@@ -82,9 +82,9 @@ Notes:
 ### TEST Tab
 
 - Factory test actions are enabled only while the global status is `Online`.
-- `Dual Mode Test` updates `CAM_DIS_MODE` to `"3"` in `/data/camera/cam_param.bin`, then reboots the device.
+- `Dual Mode Test` updates `CAM_DIS_MODE` to `"3"` in `/data/camera/cam_param.bin`, then restarts the `mav_client` camera service.
 - `SDCard Test` checks mount state (`/mnt/sdcard`) and runs write/read/remove test.
-- `Reset` removes `/data/camera/cam_param.bin`, syncs, then reboots.
+- `Reset` removes `/data/camera/cam_param.bin`, syncs, then restarts the `mav_client` camera service.
 
 ## Build Executable
 

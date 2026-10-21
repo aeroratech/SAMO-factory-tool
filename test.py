@@ -106,10 +106,10 @@ class TestTab(QWidget):
     def on_dual_finished(self, exitCode, exitStatus):
         if exitCode == 0:
             self.append_log("Dual Mode set SUCCESS.", True)
+            self.restart_camera_service()
         else:
             self.append_log("Dual Mode set FAILED.", True)
         self.append_log("Please using uvc player for preview", True)
-        self.reboot_device()
 
     def run_sdcard_test(self):
         self.append_log("Checking SDCard mount status...", True)
@@ -185,54 +185,57 @@ class TestTab(QWidget):
         if exitCode == 0:
             self.append_log("File system synced.", False)
 
-            # Step 3: reboot device
-            self.reboot_device()
+            # Step 3: restart the camera service
+            self.restart_camera_service()
         else:
             self.append_log("Reset FAILED (ADB error during sync).", True)
 
-    def reboot_device(self):
-        self.reboot_process = QProcess(self)
+    def restart_camera_service(self):
+        self.service_process = QProcess(self)
 
-        self.reboot_process.readyReadStandardOutput.connect(
-            self.handle_reboot_stdout
+        self.service_process.readyReadStandardOutput.connect(
+            self.handle_service_stdout
         )
-        self.reboot_process.readyReadStandardError.connect(
-            self.handle_reboot_stderr
+        self.service_process.readyReadStandardError.connect(
+            self.handle_service_stderr
         )
-        self.reboot_process.finished.connect(
-            self.on_reboot_finished
+        self.service_process.finished.connect(
+            self.on_service_finished
         )
-        self.reboot_process.start("adb", ["reboot"])
+        self.service_process.start(
+            "adb",
+            ["shell", "systemctl", "restart", "mav_client"],
+        )
 
-    def handle_reboot_stdout(self):
-        data = self.reboot_process.readAllStandardOutput()
+    def handle_service_stdout(self):
+        data = self.service_process.readAllStandardOutput()
         text = bytes(data).decode("utf-8", errors="ignore")
-        self.process_reboot_output(text)
+        self.process_service_output(text)
 
-    def handle_reboot_stderr(self):
-        data = self.reboot_process.readAllStandardError()
+    def handle_service_stderr(self):
+        data = self.service_process.readAllStandardError()
         text = bytes(data).decode("utf-8", errors="ignore")
-        self.process_reboot_output(text)
+        self.process_service_output(text)
 
-    def process_reboot_output(self, text):
-        if not hasattr(self, "reboot_buffer"):
-            self.reboot_buffer = ""
-        self.reboot_buffer += text
-        self.reboot_buffer = self.reboot_buffer.replace("\r", "")
+    def process_service_output(self, text):
+        if not hasattr(self, "service_buffer"):
+            self.service_buffer = ""
+        self.service_buffer += text
+        self.service_buffer = self.service_buffer.replace("\r", "")
 
-        lines = self.reboot_buffer.split("\n")
-        self.reboot_buffer = lines[-1]
+        lines = self.service_buffer.split("\n")
+        self.service_buffer = lines[-1]
 
         for line in lines[:-1]:
             line = line.strip()
             if line:
                 self.append_log(line, False)
 
-    def on_reboot_finished(self, exitCode, exitStatus):
+    def on_service_finished(self, exitCode, exitStatus):
         if exitCode == 0:
-            self.append_log("Device rebooting ...", True)
+            self.append_log("Camera service restarted.", True)
         else:
-            self.append_log("Device reboot FAILED.", True)
+            self.append_log("Camera service restart FAILED.", True)
 
     # ===============================
     # log
