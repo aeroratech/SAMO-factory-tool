@@ -1,10 +1,9 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QTextEdit,QLabel,
+    QWidget, QVBoxLayout,
+    QPushButton, QTextEdit,
 
 )
-from PySide6.QtCore import QProcess, QThread, Signal, Qt
-import time
+from PySide6.QtCore import QProcess
 
 
 class TestTab(QWidget):
@@ -14,23 +13,12 @@ class TestTab(QWidget):
         self.last_device_online = None
         self.test_buffer = ""
         self.init_ui()
-        self.start_adb_monitor()
 
     # ===============================
     # UI
     # ===============================
     def init_ui(self):
         main_layout = QVBoxLayout()
-
-        # ===== Top status layout =====
-        status_layout = QHBoxLayout()
-        self.device_status_label = QLabel("Offline")  # default offline
-        self.device_status_label.setAlignment(Qt.AlignCenter)
-        self.device_status_label.setStyleSheet("color: red; font-weight: bold;")
-        status_layout.addWidget(QLabel("Device status:          "))
-        status_layout.addWidget(self.device_status_label)
-        status_layout.addStretch()
-        main_layout.addLayout(status_layout)
 
         # ===== buttons layout =====
         button_layout = QVBoxLayout()
@@ -76,21 +64,9 @@ class TestTab(QWidget):
         self.btn_sdcard.clicked.connect(self.run_sdcard_test)
         self.btn_reset.clicked.connect(self.run_reset)
 
-    def start_adb_monitor(self):
-        self.adb_thread = AdbMonitorThread()
-        self.adb_thread.device_status_signal.connect(self.update_buttons)
-        self.adb_thread.start()
-
-    def update_buttons(self, online):
+    def set_device_online(self, online):
         for btn in [self.btn_dual_mode, self.btn_sdcard, self.btn_reset]:
             btn.setEnabled(online)
-        # Update text label
-        if online:
-            self.device_status_label.setText("Online")
-            self.device_status_label.setStyleSheet("color: green; font-weight: bold;")
-        else:
-            self.device_status_label.setText("Offline")
-            self.device_status_label.setStyleSheet("color: red; font-weight: bold;")
 
         # Log only when the device **becomes online**
         if online and (self.last_device_online is None or not self.last_device_online):
@@ -275,39 +251,3 @@ class TestTab(QWidget):
             self.test_text_edit.append(text)
         else:
             self.test_text_edit.append(text)
-
-class AdbMonitorThread(QThread):
-    # Signal: True = device online, False = device offline
-    device_status_signal = Signal(bool)
-
-    def __init__(self, interval=2):
-        super().__init__()
-        self.interval = interval  # check interval in seconds
-        self._running = True
-        self._last_online = None  # Track last state to avoid redundant signals
-
-    def run(self):
-        while self._running:
-            try:
-                # Use QProcess to avoid console window on Windows
-                process = QProcess()
-                process.start("adb", ["get-state"])
-                process.waitForFinished(3000)  # 3 second timeout
-                if process.exitCode() == 0:
-                    output = bytes(process.readAllStandardOutput()).decode("utf-8", errors="ignore").strip()
-                    online = output == "device"
-                else:
-                    online = False
-            except Exception:
-                online = False
-
-            # Only emit signal when state changes (or first run)
-            if self._last_online != online:
-                self.device_status_signal.emit(online)
-                self._last_online = online
-
-            time.sleep(self.interval)
-
-    def stop(self):
-        self._running = False
-        self.wait()

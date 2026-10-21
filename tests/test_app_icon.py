@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication
 
 from main import MainWindow
 
@@ -15,7 +15,7 @@ class ApplicationIconTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def test_main_window_has_an_application_icon_at_desktop_size(self):
-        with patch("main.TestTab", QWidget):
+        with patch("main.DeviceMonitorThread.start"):
             window = MainWindow()
         icon = window.windowIcon()
 

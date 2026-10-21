@@ -49,6 +49,12 @@ When selecting an update folder in the `Update` tab, it must include:
 
 ## Tab Behavior
 
+A global device status is shown above all three tabs:
+
+- `Upgrade`: `fastboot devices` returns a device.
+- `Online`: no Fastboot device is present and `adb get-state` returns `device`.
+- `Offline`: neither Fastboot nor ADB reports a device.
+
 ### Info Tab
 
 - `Version` runs:
@@ -75,7 +81,7 @@ Notes:
 
 ### TEST Tab
 
-- Device status (`Online`/`Offline`) is monitored in background via `adb get-state`.
+- Factory test actions are enabled only while the global status is `Online`.
 - `Dual Mode Test` updates `CAM_DIS_MODE` to `"3"` in `/data/camera/cam_param.bin`, then reboots the device.
 - `SDCard Test` checks mount state (`/mnt/sdcard`) and runs write/read/remove test.
 - `Reset` removes `/data/camera/cam_param.bin`, syncs, then reboots.
@@ -99,6 +105,7 @@ value: `"assets/app-icon.png;assets"`.
 ## Project Files
 
 - `main.py`: Main window and tab container.
+- `device_monitor.py`: Shared ADB/Fastboot device status monitor.
 - `assets/app-icon.png`: Runtime window/taskbar icon.
 - `assets/app-icon.ico`: Multi-size Windows executable icon.
 - `info.py`: Device version read UI/logic.

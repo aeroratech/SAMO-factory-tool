@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QTabWidget,
     QLabel,
 )
@@ -15,6 +16,7 @@ import os
 from info import InfoTab
 from update import UpdateTab
 from test import TestTab
+from device_monitor import DeviceMonitorThread
 
 
 def resource_path(relative_path):
@@ -30,8 +32,20 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(QIcon(str(resource_path("assets/app-icon.png"))))
         self.resize(600, 600)
 
+        central_widget = QWidget()
+        main_layout = QVBoxLayout(central_widget)
+
+        status_layout = QHBoxLayout()
+        status_layout.addStretch()
+        status_layout.addWidget(QLabel("Device status:"))
+        self.device_status_label = QLabel("Offline")
+        self.device_status_label.setStyleSheet("color: red; font-weight: bold;")
+        status_layout.addWidget(self.device_status_label)
+        main_layout.addLayout(status_layout)
+
         self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+        main_layout.addWidget(self.tabs)
+        self.setCentralWidget(central_widget)
 
         # create three pages
         self.tab_info = InfoTab()
@@ -41,6 +55,22 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_info, "Info")
         self.tabs.addTab(self.tab_upgrade, "Update")
         self.tabs.addTab(self.tab_test, "TEST")
+
+        self.device_monitor = DeviceMonitorThread()
+        self.device_monitor.status_changed.connect(self.update_device_status)
+        self.device_monitor.start()
+
+    def update_device_status(self, status):
+        self.device_status_label.setText(status)
+        color = {
+            "Online": "green",
+            "Upgrade": "orange",
+            "Offline": "red",
+        }.get(status, "red")
+        self.device_status_label.setStyleSheet(
+            f"color: {color}; font-weight: bold;"
+        )
+        self.tab_test.set_device_online(status == "Online")
 
     def center_window(self):
         """Center the main window on the primary screen."""
@@ -61,10 +91,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self.center_window)
 
     def closeEvent(self, event):
-        # Stop any threads in child tabs
-        if hasattr(self.tab_test, "adb_thread") and self.tab_test.adb_thread.isRunning():
-            self.tab_test.adb_thread.stop()
-            self.tab_test.adb_thread.wait()
+        if self.device_monitor.isRunning():
+            self.device_monitor.stop()
 
         super().closeEvent(event)
 
