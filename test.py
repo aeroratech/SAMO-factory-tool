@@ -10,7 +10,6 @@ class TestTab(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.last_device_online = None
         self.test_buffer = ""
         self.init_ui()
 
@@ -67,14 +66,6 @@ class TestTab(QWidget):
     def set_device_online(self, online):
         for btn in [self.btn_dual_mode, self.btn_sdcard, self.btn_reset]:
             btn.setEnabled(online)
-
-        # Log only when the device **becomes online**
-        if online and (self.last_device_online is None or not self.last_device_online):
-            from datetime import datetime
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            self.append_log(f"[{timestamp}] Device connected (Online)", True)
-
-        self.last_device_online = online
 
     def run_dual_mode(self):
         self.append_log("Setting Dual Mode ...", True)

@@ -45,6 +45,14 @@ class DeviceStatusUiTests(unittest.TestCase):
         self.assertTrue(window.tab_test.btn_reset.isEnabled())
         window.close()
 
+    def test_online_status_does_not_add_a_test_log_entry(self):
+        window = self.create_window_without_monitor()
+
+        window.update_device_status("Online")
+
+        self.assertEqual("", window.tab_test.test_text_edit.toPlainText())
+        window.close()
+
     def test_upgrade_status_disables_factory_test_actions(self):
         window = self.create_window_without_monitor()
 
