@@ -83,14 +83,24 @@ Notes:
 ## Build Executable
 
 ```bash
-pyinstaller --onefile --windowed main.py
+pyinstaller \
+  --onefile \
+  --windowed \
+  --icon assets/app-icon.ico \
+  --add-data "assets/app-icon.png:assets" \
+  main.py
 ```
 
 Output is generated under `dist/`.
 
+On Windows PowerShell, use `;` instead of `:` in the `--add-data`
+value: `"assets/app-icon.png;assets"`.
+
 ## Project Files
 
 - `main.py`: Main window and tab container.
+- `assets/app-icon.png`: Runtime window/taskbar icon.
+- `assets/app-icon.ico`: Multi-size Windows executable icon.
 - `info.py`: Device version read UI/logic.
 - `update.py`: Full update workflow and fastboot logging.
 - `test.py`: Factory test actions and ADB online monitor thread.

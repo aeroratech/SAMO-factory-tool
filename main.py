@@ -1,4 +1,6 @@
 import sys
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -8,17 +10,24 @@ from PySide6.QtWidgets import (
     QLabel,
 )
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QIcon
 import os
 from info import InfoTab
 from update import UpdateTab
 from test import TestTab
 
+
+def resource_path(relative_path):
+    """Return an asset path that works both from source and PyInstaller."""
+    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base_path / relative_path
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Factory Test Tool")
+        self.setWindowTitle("SAMO Factory Tool")
+        self.setWindowIcon(QIcon(str(resource_path("assets/app-icon.png"))))
         self.resize(600, 600)
 
         self.tabs = QTabWidget()
