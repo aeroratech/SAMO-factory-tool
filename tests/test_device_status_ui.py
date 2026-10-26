@@ -78,6 +78,65 @@ class DeviceStatusUiTests(unittest.TestCase):
         self.assertFalse(window.tab_test.btn_reset.isEnabled())
         window.close()
 
+    def test_main_window_has_settings_tab(self):
+        window = self.create_window_without_monitor()
+
+        settings_index = window.tabs.indexOf(window.tab_settings)
+
+        self.assertGreaterEqual(settings_index, 0)
+        self.assertEqual("Settings", window.tabs.tabText(settings_index))
+        window.close()
+
+    def test_device_status_controls_settings_actions(self):
+        window = self.create_window_without_monitor()
+
+        window.update_device_status("Online")
+        self.assertTrue(window.tab_settings.radio_v1.isEnabled())
+        self.assertTrue(window.tab_settings.radio_v2.isEnabled())
+        self.assertTrue(window.tab_settings.btn_apply.isEnabled())
+
+        for status in ("Offline", "Upgrade"):
+            window.update_device_status(status)
+            self.assertFalse(window.tab_settings.radio_v1.isEnabled())
+            self.assertFalse(window.tab_settings.radio_v2.isEnabled())
+            self.assertFalse(window.tab_settings.btn_apply.isEnabled())
+        window.close()
+
+    def test_entering_settings_online_refreshes_hardware_version_once(self):
+        window = self.create_window_without_monitor()
+        window.update_device_status("Online")
+
+        with patch.object(
+            window.tab_settings, "refresh_hardware_version"
+        ) as refresh:
+            window.tabs.setCurrentWidget(window.tab_settings)
+
+        refresh.assert_called_once_with()
+        window.close()
+
+    def test_entering_settings_offline_does_not_refresh(self):
+        window = self.create_window_without_monitor()
+
+        with patch.object(
+            window.tab_settings, "refresh_hardware_version"
+        ) as refresh:
+            window.tabs.setCurrentWidget(window.tab_settings)
+
+        refresh.assert_not_called()
+        window.close()
+
+    def test_becoming_online_while_settings_selected_refreshes_once(self):
+        window = self.create_window_without_monitor()
+        window.tabs.setCurrentWidget(window.tab_settings)
+
+        with patch.object(
+            window.tab_settings, "refresh_hardware_version"
+        ) as refresh:
+            window.update_device_status("Online")
+
+        refresh.assert_called_once_with()
+        window.close()
+
     def test_main_window_monitors_status_and_stops_monitor_on_close(self):
         monitor = DeviceMonitorThread(
             interval=1,

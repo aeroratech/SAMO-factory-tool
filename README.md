@@ -4,11 +4,12 @@ Desktop GUI tool (PySide6) for SAMO (`qrb5165-rb5`) factory operations over `adb
 
 ## Overview
 
-The app has 3 tabs:
+The app has 4 tabs:
 
 - `Info`: Read camera/gimbal version files from target device.
 - `Update`: Flash bootloader, kernel, and filesystem images.
 - `TEST`: Run factory checks (dual mode, SD card test, reset).
+- `Settings`: Read and set the connected device's hardware version.
 
 ## Requirements
 
@@ -49,7 +50,7 @@ When selecting an update folder in the `Update` tab, it must include:
 
 ## Tab Behavior
 
-A global device status is shown above all three tabs:
+A global device status is shown above all four tabs:
 
 - `Upgrade`: `fastboot devices` returns a device.
 - `Online`: no Fastboot device is present and `adb get-state` returns `device`.
@@ -86,6 +87,14 @@ Notes:
 - `SDCard Test` checks mount state (`/mnt/sdcard`) and runs write/read/remove test.
 - `Reset` removes `/data/camera/cam_param.bin`, syncs, then restarts the `mav_client` camera service.
 
+### Settings Tab
+
+- Settings controls are enabled only while the global status is `Online`.
+- Opening the tab reads `persist.usb.hardware.version` with `adb shell getprop`.
+- Only the exact value `v1` is shown as V1; an empty or any other value is shown as V2.
+- Applying V1 writes `v1` to the property.
+- Applying V2 clears the property instead of writing `v2`.
+
 ## Build Executable
 
 ```bash
@@ -111,6 +120,7 @@ value: `"assets/app-icon.png;assets"`.
 - `info.py`: Device version read UI/logic.
 - `update.py`: Full update workflow and fastboot logging.
 - `test.py`: Factory test actions and ADB online monitor thread.
+- `settings.py`: Hardware-version property UI and ADB read/write logic.
 
 ## Troubleshooting
 

@@ -16,6 +16,7 @@ import os
 from info import InfoTab
 from update import UpdateTab
 from test import TestTab
+from settings import SettingsTab
 from device_monitor import DeviceMonitorThread
 
 
@@ -51,16 +52,25 @@ class MainWindow(QMainWindow):
         self.tab_info = InfoTab()
         self.tab_upgrade = UpdateTab()
         self.tab_test = TestTab()
+        self.tab_settings = SettingsTab()
 
         self.tabs.addTab(self.tab_info, "Info")
         self.tabs.addTab(self.tab_upgrade, "Update")
         self.tabs.addTab(self.tab_test, "TEST")
+        self.tabs.addTab(self.tab_settings, "Settings")
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+
+        self._device_online = False
 
         self.device_monitor = DeviceMonitorThread()
         self.device_monitor.status_changed.connect(self.update_device_status)
         self.device_monitor.start()
 
     def update_device_status(self, status):
+        device_online = status == "Online"
+        became_online = device_online and not self._device_online
+        self._device_online = device_online
+
         self.device_status_label.setText(status)
         color = {
             "Online": "green",
@@ -70,7 +80,17 @@ class MainWindow(QMainWindow):
         self.device_status_label.setStyleSheet(
             f"color: {color}; font-weight: bold;"
         )
-        self.tab_test.set_device_online(status == "Online")
+        self.tab_test.set_device_online(device_online)
+        self.tab_settings.set_device_online(device_online)
+        if became_online and self.tabs.currentWidget() is self.tab_settings:
+            self.tab_settings.refresh_hardware_version()
+
+    def on_tab_changed(self, _index):
+        if (
+            self._device_online
+            and self.tabs.currentWidget() is self.tab_settings
+        ):
+            self.tab_settings.refresh_hardware_version()
 
     def center_window(self):
         """Center the main window on the primary screen."""
