@@ -78,13 +78,15 @@ class DeviceStatusUiTests(unittest.TestCase):
         self.assertFalse(window.tab_test.btn_reset.isEnabled())
         window.close()
 
-    def test_main_window_has_settings_tab(self):
+    def test_main_window_places_settings_before_lowercase_test_tab(self):
         window = self.create_window_without_monitor()
 
-        settings_index = window.tabs.indexOf(window.tab_settings)
+        tab_labels = [
+            window.tabs.tabText(index)
+            for index in range(window.tabs.count())
+        ]
 
-        self.assertGreaterEqual(settings_index, 0)
-        self.assertEqual("Settings", window.tabs.tabText(settings_index))
+        self.assertEqual(["Info", "Update", "Settings", "test"], tab_labels)
         window.close()
 
     def test_device_status_controls_settings_actions(self):

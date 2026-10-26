@@ -8,8 +8,8 @@ The app has 4 tabs:
 
 - `Info`: Read camera/gimbal version files from target device.
 - `Update`: Flash bootloader, kernel, and filesystem images.
-- `TEST`: Run factory checks (dual mode, SD card test, reset).
 - `Settings`: Read and set the connected device's hardware version.
+- `test`: Run factory checks (dual mode, SD card test, reset).
 
 ## Requirements
 
@@ -80,7 +80,7 @@ Notes:
 - `Update` is disabled until a fastboot device is detected.
 - `Reboot` is enabled after full update success (and can also be enabled after fastboot detection).
 
-### TEST Tab
+### test Tab
 
 - Factory test actions are enabled only while the global status is `Online`.
 - `Dual Mode Test` updates `CAM_DIS_MODE` to `"3"` in `/data/camera/cam_param.bin`, then restarts the `mav_client` camera service.
