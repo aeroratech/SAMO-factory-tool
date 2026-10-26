@@ -23,6 +23,7 @@ class SettingsTab(QWidget):
         super().__init__()
 
         self._device_online = False
+        self._read_in_progress = False
         self._apply_in_progress = False
         self.read_process = None
         self.write_process = None
@@ -62,30 +63,42 @@ class SettingsTab(QWidget):
             self.status_label.setText("Device offline.")
 
     def _update_controls(self):
-        enabled = self._device_online and not self._apply_in_progress
+        enabled = (
+            self._device_online
+            and not self._read_in_progress
+            and not self._apply_in_progress
+        )
         self.radio_v1.setEnabled(enabled)
         self.radio_v2.setEnabled(enabled)
         self.btn_apply.setEnabled(enabled)
 
     def refresh_hardware_version(self):
-        if not self._device_online:
-            return
         if (
-            self.read_process is not None
-            and self.read_process.state() != QProcess.NotRunning
+            not self._device_online
+            or self._read_in_progress
+            or self._apply_in_progress
         ):
             return
 
         process = QProcess(self)
         self.read_process = process
+        self._read_in_progress = True
+        self._update_controls()
         process.finished.connect(
             lambda exit_code, _exit_status, active_process=process:
             self._on_read_finished(active_process, exit_code)
+        )
+        process.errorOccurred.connect(
+            lambda error, active_process=process:
+            self._on_read_error(active_process, error)
         )
         self.status_label.setText("Reading hardware version...")
         process.start("adb", ["shell", "getprop", PROPERTY_NAME])
 
     def _on_read_finished(self, process, exit_code):
+        if process is not self.read_process:
+            return
+
         if exit_code == 0:
             raw_value = bytes(process.readAllStandardOutput()).decode(
                 "utf-8", errors="ignore"
@@ -99,16 +112,34 @@ class SettingsTab(QWidget):
         else:
             self.status_label.setText("Failed to read hardware version.")
 
-        if process is self.read_process:
-            self.read_process = None
+        self._complete_read(process)
+
+    def _on_read_error(self, process, error):
+        if error != QProcess.FailedToStart or process is not self.read_process:
+            return
+
+        if self._device_online:
+            self.status_label.setText("Failed to read hardware version.")
+        else:
+            self.status_label.setText("Device offline.")
+        self._complete_read(process)
+
+    def _complete_read(self, process):
+        self.read_process = None
+        self._read_in_progress = False
+        self._update_controls()
         process.deleteLater()
 
     def apply_hardware_version(self):
-        if not self._device_online or self._apply_in_progress:
+        if (
+            not self._device_online
+            or self._read_in_progress
+            or self._apply_in_progress
+        ):
             return
 
-        property_value = "v1" if self.radio_v1.isChecked() else ""
-        version = "V1" if property_value == "v1" else "V2"
+        shell_value = "v1" if self.radio_v1.isChecked() else "''"
+        version = "V1" if shell_value == "v1" else "V2"
 
         process = QProcess(self)
         self.write_process = process
@@ -121,15 +152,20 @@ class SettingsTab(QWidget):
                 active_process, exit_code, pending_version
             )
         )
+        process.errorOccurred.connect(
+            lambda error, active_process=process,
+            pending_version=version: self._on_write_error(
+                active_process, error, pending_version
+            )
+        )
         process.start(
             "adb",
-            ["shell", "setprop", PROPERTY_NAME, property_value],
+            ["shell", f"setprop {PROPERTY_NAME} {shell_value}"],
         )
 
     def _on_write_finished(self, process, exit_code, version):
-        if process is self.write_process:
-            self.write_process = None
-            self._apply_in_progress = False
+        if process is not self.write_process:
+            return
 
         if self._device_online:
             if exit_code == 0:
@@ -143,5 +179,22 @@ class SettingsTab(QWidget):
         else:
             self.status_label.setText("Device offline.")
 
+        self._complete_write(process)
+
+    def _on_write_error(self, process, error, version):
+        if error != QProcess.FailedToStart or process is not self.write_process:
+            return
+
+        if self._device_online:
+            self.status_label.setText(
+                f"Failed to apply hardware version {version}."
+            )
+        else:
+            self.status_label.setText("Device offline.")
+        self._complete_write(process)
+
+    def _complete_write(self, process):
+        self.write_process = None
+        self._apply_in_progress = False
         self._update_controls()
         process.deleteLater()

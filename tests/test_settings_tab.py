@@ -1,4 +1,5 @@
 import os
+import shlex
 import unittest
 from unittest.mock import patch
 
@@ -26,12 +27,14 @@ class FakeSignal:
 
 
 class ControlledProcess:
+    FailedToStart = 0
     NotRunning = 0
     Running = 2
     instances = []
 
     def __init__(self, parent=None):
         self.parent = parent
+        self.errorOccurred = FakeSignal()
         self.finished = FakeSignal()
         self.started_with = None
         self.stdout = b""
@@ -55,6 +58,10 @@ class ControlledProcess:
     def finish(self, exit_code):
         self._state = self.NotRunning
         self.finished.emit(exit_code, None)
+
+    def fail_to_start(self):
+        self._state = self.NotRunning
+        self.errorOccurred.emit(self.FailedToStart)
 
 
 class HardwareVersionMappingTests(unittest.TestCase):
@@ -162,6 +169,38 @@ class SettingsTabReadTests(unittest.TestCase):
 
         self.assertEqual(1, len(ControlledProcess.instances))
 
+    def test_read_disables_editing_until_it_finishes(self):
+        process = self.start_refresh()
+
+        self.assertFalse(self.tab.radio_v1.isEnabled())
+        self.assertFalse(self.tab.radio_v2.isEnabled())
+        self.assertFalse(self.tab.btn_apply.isEnabled())
+
+        process.stdout = b"v1\n"
+        process.finish(0)
+
+        self.assertTrue(self.tab.radio_v1.isEnabled())
+        self.assertTrue(self.tab.radio_v2.isEnabled())
+        self.assertTrue(self.tab.btn_apply.isEnabled())
+
+    def test_apply_is_ignored_while_read_is_running(self):
+        self.start_refresh()
+
+        self.tab.apply_hardware_version()
+
+        self.assertEqual(1, len(ControlledProcess.instances))
+
+    def test_read_launch_failure_reports_failure_and_allows_retry(self):
+        process = self.start_refresh()
+
+        process.fail_to_start()
+
+        self.assertIn("failed", self.tab.status_label.text().lower())
+        self.assertTrue(self.tab.btn_apply.isEnabled())
+
+        self.tab.refresh_hardware_version()
+        self.assertEqual(2, len(ControlledProcess.instances))
+
     def start_refresh(self):
         self.tab.set_device_online(True)
         self.tab.refresh_hardware_version()
@@ -190,9 +229,12 @@ class SettingsTabApplyTests(unittest.TestCase):
         self.tab.btn_apply.click()
 
         self.assertEqual(1, len(ControlledProcess.instances))
+        program, arguments = ControlledProcess.instances[0].started_with
+        self.assertEqual("adb", program)
+        self.assertEqual(["shell", f"setprop {PROPERTY_NAME} v1"], arguments)
         self.assertEqual(
-            ("adb", ["shell", "setprop", PROPERTY_NAME, "v1"]),
-            ControlledProcess.instances[0].started_with,
+            ["setprop", PROPERTY_NAME, "v1"],
+            shlex.split(arguments[1]),
         )
 
     def test_apply_v2_clears_property_instead_of_writing_v2(self):
@@ -201,9 +243,14 @@ class SettingsTabApplyTests(unittest.TestCase):
 
         self.tab.btn_apply.click()
 
-        arguments = ControlledProcess.instances[0].started_with[1]
-        self.assertEqual(["shell", "setprop", PROPERTY_NAME, ""], arguments)
-        self.assertNotIn("v2", arguments)
+        program, arguments = ControlledProcess.instances[0].started_with
+        self.assertEqual("adb", program)
+        self.assertEqual(["shell", f"setprop {PROPERTY_NAME} ''"], arguments)
+        self.assertEqual(
+            ["setprop", PROPERTY_NAME, ""],
+            shlex.split(arguments[1]),
+        )
+        self.assertNotIn("v2", arguments[1])
 
     def test_apply_is_ignored_while_offline(self):
         self.tab.apply_hardware_version()
@@ -241,6 +288,24 @@ class SettingsTabApplyTests(unittest.TestCase):
         self.assertFalse(self.tab.radio_v1.isEnabled())
         self.assertFalse(self.tab.radio_v2.isEnabled())
         self.assertFalse(self.tab.btn_apply.isEnabled())
+
+    def test_refresh_is_ignored_while_apply_is_running(self):
+        self.start_v1_apply()
+
+        self.tab.refresh_hardware_version()
+
+        self.assertEqual(1, len(ControlledProcess.instances))
+
+    def test_apply_launch_failure_reports_failure_and_allows_retry(self):
+        process = self.start_v1_apply()
+
+        process.fail_to_start()
+
+        self.assertIn("failed", self.tab.status_label.text().lower())
+        self.assertTrue(self.tab.btn_apply.isEnabled())
+
+        self.tab.apply_hardware_version()
+        self.assertEqual(2, len(ControlledProcess.instances))
 
     def start_v1_apply(self):
         self.tab.set_device_online(True)

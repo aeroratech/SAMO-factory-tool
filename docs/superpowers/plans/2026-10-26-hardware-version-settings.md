@@ -13,8 +13,8 @@
 ## Global Constraints
 
 - Only the exact trimmed property value `v1` means V1; every other value means V2.
-- V1 runs `adb shell setprop persist.usb.hardware.version v1`.
-- V2 passes an empty final value to `setprop`; it must never write `v2`.
+- V1 runs the remote shell command `setprop persist.usb.hardware.version v1`.
+- V2 runs the remote shell command `setprop persist.usb.hardware.version ''` so ADB preserves the empty value; it must never write `v2`.
 - The tab must not reboot the device or restart a service.
 - Controls are usable only while the shared device status is `Online`.
 - Preserve the user's existing uncommitted `info.py` change.
@@ -22,10 +22,11 @@
 ## Review Focus
 
 - Empty, whitespace-only, `v2`, and unexpected property values all select V2; covered by Task 1 mapping tests.
-- A failed `getprop` does not silently change the selected hardware version and reports failure; covered by Task 1 read-failure test.
-- A failed `setprop` reports failure and allows a retry while the device remains online; covered by Task 1 apply-failure test.
+- A failed or unstartable `getprop` does not silently change the selected hardware version, reports failure, and allows retry; covered by Task 1 read-failure tests.
+- A failed or unstartable `setprop` reports failure and allows a retry while the device remains online; covered by Task 1 apply-failure tests.
 - A device that disconnects while an operation is running stays disabled when that operation finishes; covered by Task 1 disconnect test.
 - Entering the tab repeatedly must not create overlapping property reads; covered by Task 1 in-flight-read test.
+- Reads and writes must not overlap or overwrite newer UI state; covered by Task 1 serialization tests.
 
 ---
 
@@ -70,6 +71,7 @@ Using a controllable fake `QProcess`, add tests that assert:
 - successful output `v1` selects `radio_v1`, while successful empty or non-`v1` output selects `radio_v2`.
 - nonzero exit reports a read failure without changing the previous selection.
 - a second refresh while the first process is running does not start another process.
+- controls stay disabled during a read, Apply cannot start concurrently, and `FailedToStart` reports failure and permits retry.
 
 - [ ] **Step 6: Run read-process tests and verify RED**
 
@@ -79,7 +81,7 @@ Expected: failures because refresh does not yet start or handle `getprop`.
 
 - [ ] **Step 7: Implement asynchronous property reading**
 
-Implement `SettingsTab(QWidget)` with the tested controls and `refresh_hardware_version()` with `QProcess`. Guard against offline and already-running reads, decode output as UTF-8 with ignored errors, update the radio selection only on exit code 0, report success/failure in `status_label`, and release the completed process.
+Implement `SettingsTab(QWidget)` with the tested controls and `refresh_hardware_version()` with `QProcess`. Guard against offline and any active read/write, decode output as UTF-8 with ignored errors, update the radio selection only on exit code 0, handle `FailedToStart`, report success/failure in `status_label`, and release the completed process.
 
 - [ ] **Step 8: Run read-process tests and verify GREEN**
 
@@ -91,11 +93,12 @@ Expected: all read-process tests pass.
 
 Add tests that assert:
 
-- selected V1 starts `("adb", ["shell", "setprop", PROPERTY_NAME, "v1"])`.
-- selected V2 starts `("adb", ["shell", "setprop", PROPERTY_NAME, ""])` and no invocation contains `"v2"`.
+- selected V1 starts `("adb", ["shell", "setprop persist.usb.hardware.version v1"])`.
+- selected V2 starts `("adb", ["shell", "setprop persist.usb.hardware.version ''"])`, which a POSIX shell parses as an empty value, and no invocation contains `"v2"`.
 - Apply is ignored while offline, is disabled while `setprop` runs, and reports success on exit code 0.
 - nonzero exit reports failure and re-enables Apply when still online.
 - going offline before process completion keeps all controls disabled afterward.
+- reads and writes are serialized, and `FailedToStart` reports failure and permits retry.
 
 - [ ] **Step 10: Run apply-process tests and verify RED**
 
@@ -105,7 +108,7 @@ Expected: failures because Apply does not yet run or handle `setprop`.
 
 - [ ] **Step 11: Implement asynchronous property writing and connection-state handling**
 
-Implement `apply_hardware_version()` and its completion handler with the exact argument lists above. Track online state, keep controls disabled during writes, restore them only if still online, and leave the selected option visible when the device disconnects.
+Implement `apply_hardware_version()` and its completion/error handlers with the exact argument lists above. Track online state, serialize reads and writes, keep controls disabled during operations, restore them only if still online, and leave the selected option visible when the device disconnects.
 
 - [ ] **Step 12: Run the widget tests and verify GREEN**
 
