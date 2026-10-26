@@ -57,7 +57,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_info, "Info")
         self.tabs.addTab(self.tab_upgrade, "Update")
         self.tabs.addTab(self.tab_settings, "Settings")
-        self.tabs.addTab(self.tab_test, "test")
+        self.tabs.addTab(self.tab_test, "Test")
         self.tabs.currentChanged.connect(self.on_tab_changed)
 
         self._device_online = False
