@@ -36,7 +36,7 @@ class InfoTab(QWidget):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(10)
 
-        self.btn_version = QPushButton("Version")
+        self.btn_version = QPushButton("Info")
         self.btn_clear = QPushButton("Clear")
 
         self.btn_version.clicked.connect(self.show_version)
