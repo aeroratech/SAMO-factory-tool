@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a Settings tab that reads the connected device's hardware version and applies V1 by writing `v1` or V2 by clearing the persistent property.
+**Goal:** Add a Settings tab that reads the connected device's hardware version and applies V1 by clearing the persistent property or V2 by writing `v2`.
 
 **Architecture:** A focused `SettingsTab` owns the PySide6 controls and asynchronous ADB property processes. `MainWindow` adds the tab, passes it global online/offline state, and requests a refresh when the operator enters the tab. A small pure mapping function makes the V1-versus-V2 default rule explicit and directly testable.
 
@@ -12,16 +12,16 @@
 
 ## Global Constraints
 
-- Only the exact trimmed property value `v1` means V1; every other value means V2.
-- V1 runs the remote shell command `setprop persist.usb.hardware.version v1`.
-- V2 runs the remote shell command `setprop persist.usb.hardware.version ''` so ADB preserves the empty value; it must never write `v2`.
+- Only the trimmed property values `v2` and `V2` mean V2; every other value means V1.
+- V1 runs the remote shell command `setprop persist.usb.hardware.version ''` so ADB preserves the empty value.
+- V2 runs the remote shell command `setprop persist.usb.hardware.version v2`.
 - The tab must not reboot the device or restart a service.
 - Controls are usable only while the shared device status is `Online`.
 - Preserve the user's existing uncommitted `info.py` change.
 
 ## Review Focus
 
-- Empty, whitespace-only, `v2`, and unexpected property values all select V2; covered by Task 1 mapping tests.
+- Empty, whitespace-only, `v1`, `V1`, and unexpected property values all select V1; `v2` and `V2` select V2; covered by Task 1 mapping tests.
 - A failed or unstartable `getprop` does not silently change the selected hardware version, reports failure, and allows retry; covered by Task 1 read-failure tests.
 - A failed or unstartable `setprop` reports failure and allows a retry while the device remains online; covered by Task 1 apply-failure tests.
 - A device that disconnects while an operation is running stays disabled when that operation finishes; covered by Task 1 disconnect test.
@@ -43,7 +43,7 @@
 
 - [ ] **Step 1: Write failing property-mapping tests**
 
-Add `HardwareVersionMappingTests` with separate tests asserting that `"v1\n"` maps to `"v1"`, while `""`, whitespace, `"v2"`, `"V1"`, and an unexpected value each map to `"v2"`.
+Add `HardwareVersionMappingTests` with separate tests asserting that `"v2\n"` and `"V2"` map to `"v2"`, while `""`, whitespace, `"v1"`, `"V1"`, and an unexpected value each map to `"v1"`.
 
 - [ ] **Step 2: Run mapping tests and verify RED**
 
@@ -68,7 +68,7 @@ Using a controllable fake `QProcess`, add tests that assert:
 - a new `SettingsTab` contains mutually exclusive V1/V2 choices, an Apply button, and a status label, with both choices and Apply initially disabled.
 - `set_device_online(True)` enables both choices and Apply.
 - `refresh_hardware_version()` starts `("adb", ["shell", "getprop", PROPERTY_NAME])` only while online.
-- successful output `v1` selects `radio_v1`, while successful empty or non-`v1` output selects `radio_v2`.
+- successful output `v2` or `V2` selects `radio_v2`, while successful empty or non-`v2` output selects `radio_v1`.
 - nonzero exit reports a read failure without changing the previous selection.
 - a second refresh while the first process is running does not start another process.
 - controls stay disabled during a read, Apply cannot start concurrently, and `FailedToStart` reports failure and permits retry.
@@ -93,8 +93,8 @@ Expected: all read-process tests pass.
 
 Add tests that assert:
 
-- selected V1 starts `("adb", ["shell", "setprop persist.usb.hardware.version v1"])`.
-- selected V2 starts `("adb", ["shell", "setprop persist.usb.hardware.version ''"])`, which a POSIX shell parses as an empty value, and no invocation contains `"v2"`.
+- selected V1 starts `("adb", ["shell", "setprop persist.usb.hardware.version ''"])`, which a POSIX shell parses as an empty value.
+- selected V2 starts `("adb", ["shell", "setprop persist.usb.hardware.version v2"])`.
 - Apply is ignored while offline, is disabled while `setprop` runs, and reports success on exit code 0.
 - nonzero exit reports failure and re-enables Apply when still online.
 - going offline before process completion keeps all controls disabled afterward.
@@ -152,7 +152,7 @@ Expected: failures because `MainWindow` has no Settings tab.
 
 - [ ] **Step 3: Integrate Settings into the main window**
 
-Import and construct `SettingsTab`, add it after TEST as the `Settings` tab, propagate status through `set_device_online(status == "Online")`, connect `QTabWidget.currentChanged` to refresh only when Settings is selected and the status is Online, and refresh once if status becomes Online while Settings is selected.
+Import and construct `SettingsTab`, add it before Test as the `Settings` tab, propagate status through `set_device_online(status == "Online")`, connect `QTabWidget.currentChanged` to refresh only when Settings is selected and the status is Online, and refresh once if status becomes Online while Settings is selected.
 
 - [ ] **Step 4: Run integration tests and verify GREEN**
 
@@ -162,7 +162,7 @@ Expected: all device-status UI tests pass.
 
 - [ ] **Step 5: Update user-facing documentation**
 
-Update `README.md` from three to four tabs and document that Settings reads the property, maps only `v1` to V1, writes `v1` for V1, clears the property for V2, and requires an Online device.
+Update `README.md` from three to four tabs and document that Settings reads the property, maps only `v2`/`V2` to V2, clears the property for V1, writes `v2` for V2, and requires an Online device.
 
 - [ ] **Step 6: Run the complete test suite and static diff checks**
 

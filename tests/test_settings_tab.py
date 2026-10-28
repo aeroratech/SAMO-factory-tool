@@ -65,23 +65,26 @@ class ControlledProcess:
 
 
 class HardwareVersionMappingTests(unittest.TestCase):
-    def test_trimmed_v1_property_maps_to_v1(self):
-        self.assertEqual("v1", hardware_version_from_property("v1\n"))
+    def test_trimmed_v2_property_maps_to_v2(self):
+        self.assertEqual("v2", hardware_version_from_property("v2\n"))
 
-    def test_empty_property_maps_to_v2(self):
-        self.assertEqual("v2", hardware_version_from_property(""))
+    def test_uppercase_v2_property_maps_to_v2(self):
+        self.assertEqual("v2", hardware_version_from_property("V2"))
 
-    def test_whitespace_property_maps_to_v2(self):
-        self.assertEqual("v2", hardware_version_from_property("  \n"))
+    def test_empty_property_maps_to_v1(self):
+        self.assertEqual("v1", hardware_version_from_property(""))
 
-    def test_v2_property_maps_to_v2(self):
-        self.assertEqual("v2", hardware_version_from_property("v2"))
+    def test_whitespace_property_maps_to_v1(self):
+        self.assertEqual("v1", hardware_version_from_property("  \n"))
 
-    def test_uppercase_v1_property_maps_to_v2(self):
-        self.assertEqual("v2", hardware_version_from_property("V1"))
+    def test_v1_property_maps_to_v1(self):
+        self.assertEqual("v1", hardware_version_from_property("v1"))
 
-    def test_unexpected_property_maps_to_v2(self):
-        self.assertEqual("v2", hardware_version_from_property("prototype"))
+    def test_uppercase_v1_property_maps_to_v1(self):
+        self.assertEqual("v1", hardware_version_from_property("V1"))
+
+    def test_unexpected_property_maps_to_v1(self):
+        self.assertEqual("v1", hardware_version_from_property("prototype"))
 
 
 class SettingsTabReadTests(unittest.TestCase):
@@ -106,8 +109,9 @@ class SettingsTabReadTests(unittest.TestCase):
         self.assertFalse(self.tab.radio_v2.isEnabled())
         self.assertFalse(self.tab.btn_apply.isEnabled())
         self.assertIsNotNone(self.tab.status_label)
+        self.assertTrue(self.tab.radio_v1.isChecked())
+        self.assertFalse(self.tab.radio_v2.isChecked())
 
-        self.tab.radio_v1.setChecked(True)
         self.tab.radio_v2.setChecked(True)
         self.assertFalse(self.tab.radio_v1.isChecked())
         self.assertTrue(self.tab.radio_v2.isChecked())
@@ -142,15 +146,25 @@ class SettingsTabReadTests(unittest.TestCase):
         self.assertFalse(self.tab.radio_v2.isChecked())
         self.assertIn("V1", self.tab.status_label.text())
 
-    def test_successful_non_v1_read_selects_v2(self):
+    def test_successful_uppercase_v2_read_selects_v2(self):
         process = self.start_refresh()
-        process.stdout = b"prototype\n"
+        process.stdout = b"V2\n"
 
         process.finish(0)
 
         self.assertFalse(self.tab.radio_v1.isChecked())
         self.assertTrue(self.tab.radio_v2.isChecked())
         self.assertIn("V2", self.tab.status_label.text())
+
+    def test_successful_unexpected_read_selects_v1(self):
+        process = self.start_refresh()
+        process.stdout = b"prototype\n"
+
+        process.finish(0)
+
+        self.assertTrue(self.tab.radio_v1.isChecked())
+        self.assertFalse(self.tab.radio_v2.isChecked())
+        self.assertIn("V1", self.tab.status_label.text())
 
     def test_failed_read_preserves_selection_and_reports_failure(self):
         self.tab.radio_v1.setChecked(True)
@@ -222,7 +236,7 @@ class SettingsTabApplyTests(unittest.TestCase):
         self.tab.close()
         self.process_patch.stop()
 
-    def test_apply_v1_writes_v1_property_value(self):
+    def test_apply_v1_clears_property(self):
         self.tab.set_device_online(True)
         self.tab.radio_v1.setChecked(True)
 
@@ -231,13 +245,13 @@ class SettingsTabApplyTests(unittest.TestCase):
         self.assertEqual(1, len(ControlledProcess.instances))
         program, arguments = ControlledProcess.instances[0].started_with
         self.assertEqual("adb", program)
-        self.assertEqual(["shell", f"setprop {PROPERTY_NAME} v1"], arguments)
+        self.assertEqual(["shell", f"setprop {PROPERTY_NAME} ''"], arguments)
         self.assertEqual(
-            ["setprop", PROPERTY_NAME, "v1"],
+            ["setprop", PROPERTY_NAME, ""],
             shlex.split(arguments[1]),
         )
 
-    def test_apply_v2_clears_property_instead_of_writing_v2(self):
+    def test_apply_v2_writes_v2_property_value(self):
         self.tab.set_device_online(True)
         self.tab.radio_v2.setChecked(True)
 
@@ -245,12 +259,11 @@ class SettingsTabApplyTests(unittest.TestCase):
 
         program, arguments = ControlledProcess.instances[0].started_with
         self.assertEqual("adb", program)
-        self.assertEqual(["shell", f"setprop {PROPERTY_NAME} ''"], arguments)
+        self.assertEqual(["shell", f"setprop {PROPERTY_NAME} v2"], arguments)
         self.assertEqual(
-            ["setprop", PROPERTY_NAME, ""],
+            ["setprop", PROPERTY_NAME, "v2"],
             shlex.split(arguments[1]),
         )
-        self.assertNotIn("v2", arguments[1])
 
     def test_apply_is_ignored_while_offline(self):
         self.tab.apply_hardware_version()

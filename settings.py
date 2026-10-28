@@ -15,7 +15,7 @@ PROPERTY_NAME = "persist.usb.hardware.version"
 
 
 def hardware_version_from_property(raw_value: str) -> str:
-    return "v1" if raw_value.strip() == "v1" else "v2"
+    return "v2" if raw_value.strip().lower() == "v2" else "v1"
 
 
 class SettingsTab(QWidget):
@@ -30,7 +30,7 @@ class SettingsTab(QWidget):
 
         self.radio_v1 = QRadioButton("V1")
         self.radio_v2 = QRadioButton("V2")
-        self.radio_v2.setChecked(True)
+        self.radio_v1.setChecked(True)
 
         self.version_group = QButtonGroup(self)
         self.version_group.addButton(self.radio_v1)
@@ -138,8 +138,8 @@ class SettingsTab(QWidget):
         ):
             return
 
-        shell_value = "v1" if self.radio_v1.isChecked() else "''"
-        version = "V1" if shell_value == "v1" else "V2"
+        shell_value = "v2" if self.radio_v2.isChecked() else "''"
+        version = "V2" if shell_value == "v2" else "V1"
 
         process = QProcess(self)
         self.write_process = process

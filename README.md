@@ -91,9 +91,9 @@ Notes:
 
 - Settings controls are enabled only while the global status is `Online`.
 - Opening the tab reads `persist.usb.hardware.version` with `adb shell getprop`.
-- Only the exact value `v1` is shown as V1; an empty or any other value is shown as V2.
-- Applying V1 writes `v1` to the property.
-- Applying V2 clears the property instead of writing `v2`.
+- Only `v2` or `V2` is shown as V2; an empty or any other value is shown as V1.
+- Applying V1 clears the property.
+- Applying V2 writes `v2` to the property.
 
 ## Build Executable
 

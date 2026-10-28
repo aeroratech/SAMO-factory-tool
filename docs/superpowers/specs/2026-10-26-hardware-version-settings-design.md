@@ -8,9 +8,10 @@ Add a dedicated Settings tab so factory operators can see and change the connect
 
 - Add a `Settings` tab containing V1 and V2 hardware-version choices and an `Apply` button.
 - When the settings page is opened, read `persist.usb.hardware.version` with `adb shell getprop`.
-- Interpret only the exact trimmed value `v1` as V1; interpret an empty value or any other value as V2.
-- Applying V1 runs `adb shell setprop persist.usb.hardware.version v1`.
-- Applying V2 clears the property by running `adb shell setprop persist.usb.hardware.version ''`; it must not store `v2`.
+- Interpret the trimmed values `v2` and `V2` as V2; interpret an empty value or any other value as V1.
+- Default to V1 before the property has been read.
+- Applying V1 clears the property by running `adb shell setprop persist.usb.hardware.version ''`.
+- Applying V2 runs `adb shell setprop persist.usb.hardware.version v2`.
 - Show whether reading or applying the value succeeded, and disable the controls unless the global device state is `Online`.
 
 ## Non-goals and constraints
