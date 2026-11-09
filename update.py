@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QFormLayout,
 )
-from PySide6.QtCore import QProcess
+from PySide6.QtCore import QProcess, Qt
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QTextCursor
 
@@ -31,6 +31,7 @@ class UpdateTab(QWidget):
         self.firmware_ready = False
         self.fastboot_ready = False
         self.update_in_progress = False
+        self._result_tokens = dict.fromkeys(("entry", "update", "reboot"), 0)
         self.entry_step = 0
         self.fastboot_check_attempts = 0
         self.fastboot_check_after_reboot = False
@@ -82,13 +83,21 @@ class UpdateTab(QWidget):
         self.btn_update.setEnabled(False)
         self.btn_reboot.setEnabled(False)
 
+        self.entry_result_label = self._create_result_label()
+        self.update_result_label = self._create_result_label()
+        self.reboot_result_label = self._create_result_label()
+        self._result_labels = {
+            "entry": self.entry_result_label,
+            "update": self.update_result_label,
+            "reboot": self.reboot_result_label,
+        }
         buttons = [
-            self.btn_entry_update,
-            self.btn_update,
-            self.btn_reboot,
+            (self.btn_entry_update, self.entry_result_label),
+            (self.btn_update, self.update_result_label),
+            (self.btn_reboot, self.reboot_result_label),
         ]
 
-        for btn in buttons:
+        for btn, result_label in buttons:
             btn.setMinimumHeight(50)
             btn.setStyleSheet("""
                 QPushButton {
@@ -96,7 +105,10 @@ class UpdateTab(QWidget):
                     font-weight: bold;
                 }
             """)
-            button_layout.addWidget(btn)
+            row = QHBoxLayout()
+            row.addWidget(btn)
+            row.addWidget(result_label)
+            button_layout.addLayout(row)
 
         # ===== Connect Signals =====
         self.btn_entry_update.clicked.connect(self.enter_update_mode)
@@ -120,7 +132,62 @@ class UpdateTab(QWidget):
 
         self.setLayout(main_layout)
 
+    @staticmethod
+    def _create_result_label():
+        label = QLabel("")
+        label.setFixedWidth(32)
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("font-size: 24px; font-weight: bold;")
+        return label
+
+    def _clear_results(self, *operations):
+        for operation in operations:
+            self._result_tokens[operation] += 1
+            label = self._result_labels[operation]
+            label.clear()
+            label.setStyleSheet("font-size: 24px; font-weight: bold;")
+
+    def _show_result(self, operation, passed):
+        self._result_tokens[operation] += 1
+        label = self._result_labels[operation]
+        label.setText("✓" if passed else "✗")
+        color = "green" if passed else "red"
+        label.setStyleSheet(
+            f"font-size: 24px; font-weight: bold; color: {color};"
+        )
+
+    def _guard_callback(self, operation, callback):
+        token = self._result_tokens[operation]
+
+        def guarded(*args):
+            if self._result_tokens[operation] == token:
+                callback(*args)
+
+        return guarded
+
+    def _connect_operation_process(self, process, operation, callback):
+        process.finished.connect(self._guard_callback(operation, callback))
+        process.errorOccurred.connect(self._guard_callback(
+            operation,
+            lambda error: self._on_operation_error(operation, error),
+        ))
+
+    def _on_operation_error(self, operation, error):
+        if error != QProcess.FailedToStart:
+            return
+        self.append_update_log(f"ERROR: Failed to start {operation} process.")
+        if operation == "update":
+            self._finish_update()
+        else:
+            self._show_result(operation, False)
+            self.fastboot_ready = False
+            self._update_controls()
+            self.btn_reboot.setEnabled(False)
+
     def set_update_folder(self, folder):
+        if self.update_in_progress:
+            return
+        self._clear_results("update", "reboot")
         self.update_folder_path_edit.setText(folder)
         self._refresh_firmware_status()
 
@@ -161,7 +228,8 @@ class UpdateTab(QWidget):
         self.btn_entry_update.setEnabled(not active)
         self._update_controls()
 
-    def _finish_update(self):
+    def _finish_update(self, passed=False):
+        self._show_result("update", passed)
         self._set_update_in_progress(False)
 
     def select_folder(self):
@@ -174,6 +242,9 @@ class UpdateTab(QWidget):
             self.append_update_log(f"Selected folder: {folder}")
     
     def enter_update_mode(self):
+        if self.update_in_progress:
+            return
+        self._clear_results("entry", "update", "reboot")
         self.append_update_log("Checking for device in fastboot mode...")
         self.fastboot_ready = False
         self._update_controls()
@@ -195,8 +266,8 @@ class UpdateTab(QWidget):
         self.entry_process.readyReadStandardError.connect(
             self.handle_entry_stderr
         )
-        self.entry_process.finished.connect(
-            self.on_enter_update_finished
+        self._connect_operation_process(
+            self.entry_process, "entry", self.on_enter_update_finished
         )
         self.entry_process.start("adb", args)
 
@@ -207,10 +278,15 @@ class UpdateTab(QWidget):
         self.start_entry_process(["reboot", "bootloader"])
 
     def on_enter_update_finished(self, exitCode=0, exitStatus=None):
+        if exitCode != 0 or exitStatus == QProcess.CrashExit:
+            self.append_update_log("Entering update mode FAILED.")
+            self.entry_step = 0
+            self._show_result("entry", False)
+            return
         if self.entry_step == 1:
             self.append_update_log("Waiting for device after adb root...")
             self.entry_step = 2
-            QTimer.singleShot(1000, self.wait_for_adb_after_root)
+            QTimer.singleShot(1000, self._guard_callback("entry", self.wait_for_adb_after_root))
             return
 
         if self.entry_step == 2:
@@ -224,7 +300,7 @@ class UpdateTab(QWidget):
 
         # wait for device reboot
         self.fastboot_check_attempts = 0
-        QTimer.singleShot(3000, lambda: self.check_fastboot(after_reboot=True))
+        QTimer.singleShot(3000, self._guard_callback("entry", lambda: self.check_fastboot(after_reboot=True)))
 
     def update_bootloader(self):
         folder = self.update_folder_path_edit.text()
@@ -250,11 +326,8 @@ class UpdateTab(QWidget):
         self.bootloader_process.readyReadStandardError.connect(
             self.handle_bootloader_stderr
         )
-        self.bootloader_process.errorOccurred.connect(
-            self.on_flash_process_error
-        )
-        self.bootloader_process.finished.connect(
-            self.on_bootloader_step_finished
+        self._connect_operation_process(
+            self.bootloader_process, "update", self.on_bootloader_step_finished
         )
 
         # ===== step 1 flash abl_a =====
@@ -264,8 +337,12 @@ class UpdateTab(QWidget):
             ["flash", "abl_a", self.abl_path]
         )
 
-    def on_bootloader_step_finished(self):
+    def on_bootloader_step_finished(self, exitCode=0, exitStatus=None):
         if not self.update_in_progress:
+            return
+        if exitCode != 0 or exitStatus == QProcess.CrashExit:
+            self.append_update_log("Bootloader update FAILED.")
+            self._finish_update()
             return
         if self.bootloader_step == 1:
             self.append_update_log("abl_a flashed. Flashing abl_b...")
@@ -313,11 +390,8 @@ class UpdateTab(QWidget):
         self.kernel_process.readyReadStandardError.connect(
             self.handle_kernel_stderr
         )
-        self.kernel_process.errorOccurred.connect(
-            self.on_flash_process_error
-        )
-        self.kernel_process.finished.connect(
-            self.on_kernel_finished
+        self._connect_operation_process(
+            self.kernel_process, "update", self.on_kernel_finished
         )
         # execute command
         self.kernel_process.start(
@@ -326,7 +400,7 @@ class UpdateTab(QWidget):
         )
 
     def on_kernel_finished(self, exitCode, exitStatus):
-        if exitCode == 0:
+        if exitCode == 0 and exitStatus != QProcess.CrashExit:
             self.append_update_log("Kernel update SUCCESS.", True)
             # Always continue with filesystem update as part of the update flow
             self.update_filesystem()
@@ -365,11 +439,8 @@ class UpdateTab(QWidget):
         self.filesystem_process.readyReadStandardError.connect(
             self.handle_filesystem_stderr
         )
-        self.filesystem_process.errorOccurred.connect(
-            self.on_flash_process_error
-        )
-        self.filesystem_process.finished.connect(
-            self.on_filesystem_finished
+        self._connect_operation_process(
+            self.filesystem_process, "update", self.on_filesystem_finished
         )
         self.filesystem_process.start(
             "fastboot",
@@ -377,13 +448,14 @@ class UpdateTab(QWidget):
         )
 
     def on_filesystem_finished(self, exitCode, exitStatus):
-        if exitCode == 0:
+        passed = exitCode == 0 and exitStatus != QProcess.CrashExit
+        if passed:
             self.append_update_log("File system update SUCCESS.", True)
             self.btn_reboot.setEnabled(True)
         else:
             self.append_update_log("File system update FAILED.", True)
 
-        self._finish_update()
+        self._finish_update(passed)
         # Reboot is only enabled on success above
 
     def full_update(self):
@@ -393,12 +465,15 @@ class UpdateTab(QWidget):
         """
         if self.update_in_progress:
             return
+        self._clear_results("update", "reboot")
         if not self._refresh_firmware_status():
+            self._show_result("update", False)
             self.append_update_log(
                 "ERROR: Missing required firmware files.", True
             )
             return
         if not self.fastboot_ready:
+            self._show_result("update", False)
             self.append_update_log("ERROR: No Fastboot device detected.", True)
             return
 
@@ -408,13 +483,10 @@ class UpdateTab(QWidget):
         self.btn_update.setEnabled(False)
         self.update_bootloader()
 
-    def on_flash_process_error(self, process_error):
-        if process_error != QProcess.FailedToStart:
-            return
-        self.append_update_log("ERROR: Failed to start update process.", True)
-        self._finish_update()
-
     def reboot_device(self):
+        if self.update_in_progress:
+            return
+        self._clear_results("reboot")
         self.append_update_log("Rebooting device...", True)
         self.btn_reboot.setEnabled(False)
         self.reboot_process = QProcess(self)
@@ -424,13 +496,15 @@ class UpdateTab(QWidget):
         self.reboot_process.readyReadStandardError.connect(
             self.handle_reboot_stderr
         )
-        self.reboot_process.finished.connect(
-            self.on_reboot_finished
+        self._connect_operation_process(
+            self.reboot_process, "reboot", self.on_reboot_finished
         )
         self.reboot_process.start("fastboot", ["reboot"])
 
     def on_reboot_finished(self, exitCode, exitStatus):
-        if exitCode == 0:
+        passed = exitCode == 0 and exitStatus != QProcess.CrashExit
+        self._show_result("reboot", passed)
+        if passed:
             self.append_update_log("Device reboot SUCCESS.", True)
         else:
             self.append_update_log("Device reboot FAILED.", True)
@@ -442,19 +516,25 @@ class UpdateTab(QWidget):
         self.fastboot_check_after_reboot = after_reboot
         self.fastboot_check_attempts += 1
         self.fastboot_process = QProcess(self)
-        self.fastboot_process.finished.connect(self.on_fastboot_check_finished)
+        process = self.fastboot_process
+        self._connect_operation_process(
+            process, "entry",
+            lambda code, status: self.on_fastboot_check_finished(code, status, process),
+        )
         self.fastboot_process.start("fastboot", ["devices"])
 
-    def on_fastboot_check_finished(self, exitCode=0, exitStatus=None):
+    def on_fastboot_check_finished(self, exitCode=0, exitStatus=None, process=None):
+        process = process or self.fastboot_process
         output = bytes(
-            self.fastboot_process.readAllStandardOutput()
+            process.readAllStandardOutput()
         ).decode("utf-8", errors="ignore").strip()
         error = bytes(
-            self.fastboot_process.readAllStandardError()
+            process.readAllStandardError()
         ).decode("utf-8", errors="ignore").strip()
 
         devices = self.parse_fastboot_devices(output)
-        if devices:
+        if devices and exitCode == 0 and exitStatus != QProcess.CrashExit:
+            self._show_result("entry", True)
             self.append_update_log("Fastboot device detected:")
             self.append_update_log("\n".join(devices), False)
             self.fastboot_ready = True
@@ -477,10 +557,11 @@ class UpdateTab(QWidget):
         max_attempts = 10
         if self.fastboot_check_attempts < max_attempts:
             self.append_update_log("No fastboot device found. Waiting...")
-            QTimer.singleShot(1000, lambda: self.check_fastboot(after_reboot=True))
+            QTimer.singleShot(1000, self._guard_callback("entry", lambda: self.check_fastboot(after_reboot=True)))
             return
 
         self.append_update_log("No fastboot device found.")
+        self._show_result("entry", False)
 
     def parse_fastboot_devices(self, output):
         return [

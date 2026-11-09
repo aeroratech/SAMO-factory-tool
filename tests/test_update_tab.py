@@ -32,6 +32,7 @@ class FakeSignal:
 
 class RecordingProcess:
     FailedToStart = 0
+    CrashExit = 1
     instances = []
 
     def __init__(self, parent=None):
@@ -334,6 +335,128 @@ class UpdateTabReadinessTests(unittest.TestCase):
         self.assertEqual(1, len(RecordingProcess.instances))
         self.assertTrue(self.tab.btn_select_folder.isEnabled())
         self.assertTrue(self.tab.btn_update.isEnabled())
+
+class UpdateOperationResultTests(UpdateTabReadinessTests):
+    def seed_results(self):
+        for operation in ("entry", "update", "reboot"):
+            self.tab._show_result(operation, True)
+
+    def start_update(self):
+        self.create_package()
+        self.tab.set_update_folder(str(self.root))
+        self.detect_fastboot()
+        self.tab.full_update()
+
+    def test_initial_results_are_blank(self):
+        for label in self.tab._result_labels.values():
+            self.assertEqual("", label.text())
+
+    def test_entry_clears_all_results(self):
+        self.seed_results()
+        with patch("update.QProcess", RecordingProcess):
+            self.tab.enter_update_mode()
+        for label in self.tab._result_labels.values():
+            self.assertEqual("", label.text())
+
+    def test_update_clears_downstream_results_and_preserves_entry(self):
+        self.create_package()
+        self.tab.set_update_folder(str(self.root))
+        self.detect_fastboot()
+        self.seed_results()
+        with patch("update.QProcess", RecordingProcess):
+            self.tab.full_update()
+        self.assertEqual("✓", self.tab.entry_result_label.text())
+        self.assertEqual("", self.tab.update_result_label.text())
+        self.assertEqual("", self.tab.reboot_result_label.text())
+
+    def test_reboot_clears_only_reboot_and_reports_result(self):
+        self.seed_results()
+        with patch("update.QProcess", RecordingProcess):
+            self.tab.reboot_device()
+            self.assertEqual("", self.tab.reboot_result_label.text())
+            self.tab.reboot_process.finished.emit(0, None)
+        self.assertEqual("✓", self.tab.entry_result_label.text())
+        self.assertEqual("✓", self.tab.update_result_label.text())
+        self.assertEqual("✓", self.tab.reboot_result_label.text())
+
+    def test_folder_change_clears_update_and_reboot(self):
+        self.seed_results()
+        self.tab.set_update_folder(str(self.root))
+        self.assertEqual("✓", self.tab.entry_result_label.text())
+        self.assertEqual("", self.tab.update_result_label.text())
+        self.assertEqual("", self.tab.reboot_result_label.text())
+
+    def test_full_chain_shows_success_only_after_filesystem_finishes(self):
+        with patch("update.QProcess", RecordingProcess):
+            self.start_update()
+            self.tab.bootloader_process.finished.emit(0, None)
+            self.tab.bootloader_process.finished.emit(0, None)
+            self.tab.kernel_process.finished.emit(0, None)
+            self.assertEqual("", self.tab.update_result_label.text())
+            self.tab.filesystem_process.finished.emit(0, None)
+        self.assertEqual("✓", self.tab.update_result_label.text())
+        self.assertIn("green", self.tab.update_result_label.styleSheet())
+        self.assertFalse(self.tab.update_in_progress)
+
+    def test_bootloader_failure_stops_chain(self):
+        with patch("update.QProcess", RecordingProcess):
+            self.start_update()
+            self.tab.bootloader_process.finished.emit(1, None)
+        self.assertEqual("✗", self.tab.update_result_label.text())
+        self.assertIn("red", self.tab.update_result_label.styleSheet())
+        self.assertEqual(1, len(RecordingProcess.instances))
+        self.assertFalse(self.tab.update_in_progress)
+
+    def test_kernel_and_filesystem_failure_show_cross(self):
+        for stage in ("kernel", "filesystem"):
+            with self.subTest(stage=stage), patch("update.QProcess", RecordingProcess):
+                self.start_update()
+                self.tab.bootloader_process.finished.emit(0, None)
+                self.tab.bootloader_process.finished.emit(0, None)
+                if stage == "filesystem":
+                    self.tab.kernel_process.finished.emit(0, None)
+                getattr(self.tab, stage + "_process").finished.emit(1, None)
+                self.assertEqual("✗", self.tab.update_result_label.text())
+                self.assertFalse(self.tab.update_in_progress)
+
+    def test_entry_detection_and_poll_exhaustion_show_results(self):
+        self.detect_fastboot()
+        self.assertEqual("✓", self.tab.entry_result_label.text())
+        self.tab.fastboot_process = FastbootResult(output=b"")
+        self.tab.fastboot_check_after_reboot = True
+        self.tab.fastboot_check_attempts = 10
+        self.tab.on_fastboot_check_finished()
+        self.assertEqual("✗", self.tab.entry_result_label.text())
+
+    def test_adb_entry_failure_stops_before_next_command(self):
+        self.tab.entry_step = 1
+        with patch("update.QTimer.singleShot") as timer:
+            self.tab.on_enter_update_finished(1, None)
+        timer.assert_not_called()
+        self.assertEqual("✗", self.tab.entry_result_label.text())
+
+    def test_launch_failure_shows_cross_for_each_operation(self):
+        with patch("update.QProcess", RecordingProcess):
+            self.tab.enter_update_mode()
+            self.tab.fastboot_process.errorOccurred.emit(0)
+            self.assertEqual("✗", self.tab.entry_result_label.text())
+            self.start_update()
+            self.tab.bootloader_process.errorOccurred.emit(0)
+            self.assertEqual("✗", self.tab.update_result_label.text())
+            self.tab.reboot_device()
+            self.tab.reboot_process.errorOccurred.emit(0)
+            self.assertEqual("✗", self.tab.reboot_result_label.text())
+
+    def test_old_reboot_callback_cannot_override_new_run(self):
+        with patch("update.QProcess", RecordingProcess):
+            self.tab.reboot_device()
+            old_process = self.tab.reboot_process
+            self.tab.reboot_device()
+            old_process.finished.emit(0, None)
+            self.assertEqual("", self.tab.reboot_result_label.text())
+            self.tab.reboot_process.finished.emit(1, None)
+        self.assertEqual("✗", self.tab.reboot_result_label.text())
+
 
 if __name__ == "__main__":
     unittest.main()
