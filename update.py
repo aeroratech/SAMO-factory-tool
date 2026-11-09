@@ -31,6 +31,7 @@ class UpdateTab(QWidget):
         self.firmware_ready = False
         self.fastboot_ready = False
         self.update_in_progress = False
+        self.entry_in_progress = False
         self._result_tokens = dict.fromkeys(("entry", "update", "reboot"), 0)
         self.entry_step = 0
         self.fastboot_check_attempts = 0
@@ -149,7 +150,25 @@ class UpdateTab(QWidget):
             label.clear()
             label.setStyleSheet("font-size: 24px; font-weight: bold;")
 
+    def clear_device_results(self):
+        if self.entry_in_progress:
+            # Temporary disconnects are expected during adb root and reboot.
+            # Preserve the entry callbacks so Fastboot polling can continue.
+            self.entry_result_label.clear()
+            self.entry_result_label.setStyleSheet(
+                "font-size: 24px; font-weight: bold;"
+            )
+            self._clear_results("update", "reboot")
+        else:
+            self._clear_results("entry", "update", "reboot")
+            self.entry_step = 0
+        self.fastboot_ready = False
+        self._set_update_in_progress(False)
+        self.btn_reboot.setEnabled(False)
+
     def _show_result(self, operation, passed):
+        if operation == "entry":
+            self.entry_in_progress = False
         self._result_tokens[operation] += 1
         label = self._result_labels[operation]
         label.setText("✓" if passed else "✗")
@@ -247,6 +266,7 @@ class UpdateTab(QWidget):
         if self.update_in_progress:
             return
         self._clear_results("entry", "update", "reboot")
+        self.entry_in_progress = True
         self.append_update_log("Checking for device in fastboot mode...")
         self.fastboot_ready = False
         self._update_controls()

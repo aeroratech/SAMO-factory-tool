@@ -82,6 +82,8 @@ class MainWindow(QMainWindow):
         )
         self.tab_test.set_device_online(device_online)
         self.tab_settings.set_device_online(device_online)
+        if status == "Offline":
+            self.tab_upgrade.clear_device_results()
         if became_online and self.tabs.currentWidget() is self.tab_settings:
             self.tab_settings.refresh_hardware_version()
 

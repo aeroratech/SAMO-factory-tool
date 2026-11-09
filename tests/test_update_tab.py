@@ -457,6 +457,45 @@ class UpdateOperationResultTests(UpdateTabReadinessTests):
             self.tab.reboot_process.finished.emit(1, None)
         self.assertEqual("✗", self.tab.reboot_result_label.text())
 
+    def test_offline_during_bootloader_reboot_keeps_fastboot_polling(self):
+        self.create_package()
+        self.tab.set_update_folder(str(self.root))
+        with patch("update.QProcess", RecordingProcess), patch(
+            "update.QTimer.singleShot"
+        ) as timer:
+            self.tab.enter_update_mode()
+            self.tab.entry_step = 3
+            self.tab.on_enter_update_finished(0, None)
+            pending_poll = timer.call_args.args[1]
+
+            self.tab.clear_device_results()
+            self.assertFalse(self.tab.btn_update.isEnabled())
+            pending_poll()
+
+        self.assertEqual(
+            ("fastboot", ["devices"]),
+            RecordingProcess.instances[-1].started_with,
+        )
+        self.detect_fastboot()
+        self.assertTrue(self.tab.btn_update.isEnabled())
+        self.assertEqual("✓", self.tab.entry_result_label.text())
+
+    def test_offline_during_adb_root_preserves_entry_step_and_timer(self):
+        with patch("update.QProcess", RecordingProcess), patch(
+            "update.QTimer.singleShot"
+        ) as timer:
+            self.tab.enter_update_mode()
+            self.tab.entry_step = 1
+            self.tab.on_enter_update_finished(0, None)
+            pending_wait = timer.call_args.args[1]
+            self.tab.clear_device_results()
+            self.assertEqual(2, self.tab.entry_step)
+            pending_wait()
+        self.assertEqual(
+            ("adb", ["wait-for-device"]),
+            RecordingProcess.instances[-1].started_with,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

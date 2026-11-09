@@ -89,6 +89,28 @@ class DeviceStatusUiTests(unittest.TestCase):
         self.assertEqual(["Info", "Update", "Settings", "Test"], tab_labels)
         window.close()
 
+    def test_offline_clears_upgrade_results_and_invalidates_old_callbacks(self):
+        window = self.create_window_without_monitor()
+        self.addCleanup(window.close)
+        window.update_device_status("Upgrade")
+        tab = window.tab_upgrade
+        tab._show_result("entry", True)
+        tab._show_result("update", False)
+        tab._show_result("reboot", True)
+        old_callback = tab._guard_callback(
+            "update", lambda: tab._show_result("update", True)
+        )
+        firmware_status = tab.abl_status.text()
+
+        window.update_device_status("Offline")
+        old_callback()
+
+        for label in tab._result_labels.values():
+            self.assertEqual("", label.text())
+        self.assertFalse(tab.btn_update.isEnabled())
+        self.assertFalse(tab.btn_reboot.isEnabled())
+        self.assertEqual(firmware_status, tab.abl_status.text())
+
     def test_device_status_controls_settings_actions(self):
         window = self.create_window_without_monitor()
 
