@@ -83,6 +83,9 @@ Notes:
 ### Test Tab
 
 - Factory test actions are enabled only while the global status is `Online`.
+- Each action has a result indicator: blank means not run/currently running, green `✓` means the complete workflow passed, and red `✗` means it failed.
+- Clicking an action clears that action's previous result; going Offline or entering Upgrade mode clears all results.
+- Dual Mode and Reset pass only after their camera-service restart succeeds. SDCard passes only after mount detection and the write/read/remove test succeed.
 - `Dual Mode Test` updates `CAM_DIS_MODE` to `"3"` in `/data/camera/cam_param.bin`, then restarts the `mav_client` camera service.
 - `SDCard Test` checks mount state (`/mnt/sdcard`) and runs write/read/remove test.
 - `Reset` removes `/data/camera/cam_param.bin`, syncs, then restarts the `mav_client` camera service.

@@ -171,9 +171,10 @@ class TestTab(QWidget):
     def on_dual_finished(self, exitCode, exitStatus, token=None):
         if exitCode == 0:
             self.append_log("Dual Mode set SUCCESS.", True)
-            self.restart_camera_service()
+            self.restart_camera_service("dual", token)
         else:
             self.append_log("Dual Mode set FAILED.", True)
+            self._complete_test("dual", False, token)
         self.append_log("Please using uvc player for preview", True)
 
     def run_sdcard_test(self):
@@ -205,6 +206,7 @@ class TestTab(QWidget):
             self.run_sdcard_function_test(token)
         else:
             self.append_log("SDCard NOT detected ✗", True)
+            self._complete_test("sdcard", False, token)
 
     def run_sdcard_function_test(self, token=None):
         self.append_log("Running SDCard write/read test...", True)
@@ -229,6 +231,7 @@ class TestTab(QWidget):
             self.append_log("SDCard FUNCTION TEST PASS ✓", True)
         else:
             self.append_log("SDCard FUNCTION TEST FAIL ✗", True)
+        self._complete_test("sdcard", exitCode == 0, token)
 
     def run_reset(self):
         token = self._begin_test("reset")
@@ -265,17 +268,19 @@ class TestTab(QWidget):
             )
         else:
             self.append_log("Reset FAILED (ADB error during delete).", True)
+            self._complete_test("reset", False, token)
 
     def on_reset_sync_finished(self, exitCode, exitStatus, token=None):
         if exitCode == 0:
             self.append_log("File system synced.", False)
 
             # Step 3: restart the camera service
-            self.restart_camera_service()
+            self.restart_camera_service("reset", token)
         else:
             self.append_log("Reset FAILED (ADB error during sync).", True)
+            self._complete_test("reset", False, token)
 
-    def restart_camera_service(self):
+    def restart_camera_service(self, test_name, token):
         self.service_process = QProcess(self)
 
         self.service_process.readyReadStandardOutput.connect(
@@ -285,7 +290,10 @@ class TestTab(QWidget):
             self.handle_service_stderr
         )
         self.service_process.finished.connect(
-            self.on_service_finished
+            lambda exit_code, exit_status, result_name=test_name,
+            run_token=token: self.on_service_finished(
+                exit_code, exit_status, result_name, run_token
+            )
         )
         self.service_process.start(
             "adb",
@@ -316,11 +324,12 @@ class TestTab(QWidget):
             if line:
                 self.append_log(line, False)
 
-    def on_service_finished(self, exitCode, exitStatus):
+    def on_service_finished(self, exitCode, exitStatus, test_name, token):
         if exitCode == 0:
             self.append_log("Camera service restarted.", True)
         else:
             self.append_log("Camera service restart FAILED.", True)
+        self._complete_test(test_name, exitCode == 0, token)
 
     # ===============================
     # log

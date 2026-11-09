@@ -10,8 +10,15 @@ from test import TestTab
 
 
 class FakeSignal:
+    def __init__(self):
+        self.callback = None
+
     def connect(self, callback):
         self.callback = callback
+
+    def emit(self, *args):
+        if self.callback:
+            self.callback(*args)
 
 
 class RecordingProcess:
@@ -23,10 +30,14 @@ class RecordingProcess:
         self.readyReadStandardError = FakeSignal()
         self.finished = FakeSignal()
         self.started_with = None
+        self.stdout = b""
         self.instances.append(self)
 
     def start(self, program, arguments):
         self.started_with = (program, arguments)
+
+    def readAllStandardOutput(self):
+        return self.stdout
 
 
 class TestTabResultIndicatorTests(unittest.TestCase):
@@ -150,6 +161,179 @@ class TestTabResultLifecycleTests(unittest.TestCase):
 
         self.tab._complete_test("sdcard", True, current_token)
         self.assertEqual("✓", self.tab.sdcard_result_label.text())
+
+
+class TestTabDualResultTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        RecordingProcess.instances.clear()
+        self.tab = TestTab()
+        self.tab.set_device_online(True)
+
+    def tearDown(self):
+        self.tab.close()
+
+    def test_dual_parameter_failure_shows_failure(self):
+        token = self.tab._begin_test("dual")
+
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.on_dual_finished(1, None, token)
+
+        self.assertEqual("✗", self.tab.dual_result_label.text())
+        self.assertEqual([], RecordingProcess.instances)
+
+    def test_dual_parameter_success_stays_blank_while_service_restarts(self):
+        token = self.tab._begin_test("dual")
+
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.on_dual_finished(0, None, token)
+
+        self.assertEqual("", self.tab.dual_result_label.text())
+        self.assertEqual(1, len(RecordingProcess.instances))
+
+    def test_dual_service_success_shows_pass_without_changing_other_results(self):
+        sdcard_token = self.tab._begin_test("sdcard")
+        self.tab._complete_test("sdcard", False, sdcard_token)
+        reset_token = self.tab._begin_test("reset")
+        self.tab._complete_test("reset", False, reset_token)
+        self.start_dual_service_restart()
+
+        self.tab.service_process.finished.emit(0, None)
+
+        self.assertEqual("✓", self.tab.dual_result_label.text())
+        self.assertEqual("✗", self.tab.sdcard_result_label.text())
+        self.assertEqual("✗", self.tab.reset_result_label.text())
+
+    def test_dual_service_failure_shows_failure(self):
+        self.start_dual_service_restart()
+
+        self.tab.service_process.finished.emit(1, None)
+
+        self.assertEqual("✗", self.tab.dual_result_label.text())
+
+    def start_dual_service_restart(self):
+        token = self.tab._begin_test("dual")
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.on_dual_finished(0, None, token)
+        return token
+
+
+class TestTabSdcardResultTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        RecordingProcess.instances.clear()
+        self.tab = TestTab()
+        self.tab.set_device_online(True)
+
+    def tearDown(self):
+        self.tab.close()
+
+    def test_mount_failure_shows_failure(self):
+        token = self.tab._begin_test("sdcard")
+        self.tab.sdcard_process = RecordingProcess(self.tab)
+
+        self.tab.on_sdcard_check_finished(1, None, token)
+
+        self.assertEqual("✗", self.tab.sdcard_result_label.text())
+
+    def test_mount_success_stays_blank_until_function_test_passes(self):
+        token = self.start_sdcard_function_test()
+
+        self.assertEqual("", self.tab.sdcard_result_label.text())
+
+        self.tab.on_sdcard_func_finished(0, None, token)
+        self.assertEqual("✓", self.tab.sdcard_result_label.text())
+
+    def test_function_test_failure_shows_failure(self):
+        token = self.start_sdcard_function_test()
+
+        self.tab.on_sdcard_func_finished(1, None, token)
+
+        self.assertEqual("✗", self.tab.sdcard_result_label.text())
+
+    def start_sdcard_function_test(self):
+        token = self.tab._begin_test("sdcard")
+        self.tab.sdcard_process = RecordingProcess(self.tab)
+        self.tab.sdcard_process.stdout = b"/dev/mmcblk0 on /mnt/sdcard\n"
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.on_sdcard_check_finished(0, None, token)
+        return token
+
+
+class TestTabResetResultTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        RecordingProcess.instances.clear()
+        self.tab = TestTab()
+        self.tab.set_device_online(True)
+
+    def tearDown(self):
+        self.tab.close()
+
+    def test_delete_failure_shows_failure(self):
+        token = self.tab._begin_test("reset")
+
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.on_reset_delete_finished(1, None, token)
+
+        self.assertEqual("✗", self.tab.reset_result_label.text())
+
+    def test_delete_success_stays_blank_while_sync_is_pending(self):
+        token = self.tab._begin_test("reset")
+
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.on_reset_delete_finished(0, None, token)
+
+        self.assertEqual("", self.tab.reset_result_label.text())
+        self.assertEqual(1, len(RecordingProcess.instances))
+
+    def test_sync_failure_shows_failure(self):
+        token = self.tab._begin_test("reset")
+
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.on_reset_sync_finished(1, None, token)
+
+        self.assertEqual("✗", self.tab.reset_result_label.text())
+
+    def test_sync_success_stays_blank_until_service_passes(self):
+        self.start_reset_service_restart()
+
+        self.assertEqual("", self.tab.reset_result_label.text())
+
+        self.tab.service_process.finished.emit(0, None)
+        self.assertEqual("✓", self.tab.reset_result_label.text())
+
+    def test_service_failure_shows_reset_failure(self):
+        self.start_reset_service_restart()
+
+        self.tab.service_process.finished.emit(1, None)
+
+        self.assertEqual("✗", self.tab.reset_result_label.text())
+
+    def test_reset_service_result_does_not_change_dual_result(self):
+        dual_token = self.tab._begin_test("dual")
+        self.tab._complete_test("dual", False, dual_token)
+        self.start_reset_service_restart()
+
+        self.tab.service_process.finished.emit(0, None)
+
+        self.assertEqual("✗", self.tab.dual_result_label.text())
+        self.assertEqual("✓", self.tab.reset_result_label.text())
+
+    def start_reset_service_restart(self):
+        token = self.tab._begin_test("reset")
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.on_reset_sync_finished(0, None, token)
+        return token
 
 
 class TestTabCameraServiceTests(unittest.TestCase):
