@@ -105,10 +105,12 @@ class UpdateTab(QWidget):
                     font-weight: bold;
                 }
             """)
-            row = QHBoxLayout()
-            row.addWidget(btn)
-            row.addWidget(result_label)
-            button_layout.addLayout(row)
+            result_layout = QHBoxLayout(btn)
+            result_layout.setContentsMargins(12, 0, 12, 0)
+            result_layout.addStretch()
+            result_layout.addWidget(result_label)
+            result_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+            button_layout.addWidget(btn)
 
         # ===== Connect Signals =====
         self.btn_entry_update.clicked.connect(self.enter_update_mode)

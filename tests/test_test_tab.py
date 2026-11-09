@@ -67,9 +67,9 @@ class TestTabResultIndicatorTests(unittest.TestCase):
         button_layout = self.tab.layout().itemAt(0).layout()
 
         for index, (button, label) in enumerate(result_pairs):
-            row_layout = button_layout.itemAt(index).layout()
-            self.assertIs(button, row_layout.itemAt(0).widget())
-            self.assertIs(label, row_layout.itemAt(1).widget())
+            self.assertIs(button, button_layout.itemAt(index).widget())
+            self.assertIs(button, label.parentWidget())
+            self.assertIs(label, button.layout().itemAt(1).widget())
             self.assertEqual("", label.text())
             self.assertNotIn("green", label.styleSheet())
             self.assertNotIn("red", label.styleSheet())

@@ -60,10 +60,12 @@ class TestTab(QWidget):
             """)
             btn.setEnabled(False)
 
-            row_layout = QHBoxLayout()
-            row_layout.addWidget(btn)
-            row_layout.addWidget(result_label)
-            button_layout.addLayout(row_layout)
+            result_layout = QHBoxLayout(btn)
+            result_layout.setContentsMargins(12, 0, 12, 0)
+            result_layout.addStretch()
+            result_layout.addWidget(result_label)
+            result_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+            button_layout.addWidget(btn)
 
         self.test_text_edit = QTextEdit()
         self.test_text_edit.setReadOnly(True)
