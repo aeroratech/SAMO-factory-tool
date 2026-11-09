@@ -29,6 +29,7 @@ class UpdateTab(QWidget):
 
         self.process = None
         self.firmware_ready = False
+        self.fastboot_ready = False
         self.entry_step = 0
         self.fastboot_check_attempts = 0
         self.fastboot_check_after_reboot = False
@@ -143,8 +144,13 @@ class UpdateTab(QWidget):
                 ready = False
 
         self.firmware_ready = ready
-        self.btn_update.setEnabled(False)
+        self._update_controls()
         return ready
+
+    def _update_controls(self):
+        self.btn_update.setEnabled(
+            self.firmware_ready and self.fastboot_ready
+        )
 
     def select_folder(self):
         folder = QFileDialog.getExistingDirectory(
@@ -157,7 +163,8 @@ class UpdateTab(QWidget):
     
     def enter_update_mode(self):
         self.append_update_log("Checking for device in fastboot mode...")
-        self.btn_update.setEnabled(False)
+        self.fastboot_ready = False
+        self._update_controls()
         self.btn_reboot.setEnabled(False)
         self.entry_step = 0
         self.fastboot_check_attempts = 0
@@ -212,7 +219,7 @@ class UpdateTab(QWidget):
         if not folder:
             self.append_update_log("Please select update folder first.")
             return
-        abl_path = os.path.join(folder, "abl.elf")
+        abl_path = os.path.join(folder, ABL_IMAGE_NAME)
         if not os.path.exists(abl_path):
             self.append_update_log(f"ERROR: File not found -> {abl_path}")
             return
@@ -263,7 +270,7 @@ class UpdateTab(QWidget):
             self.append_update_log("Please select update folder.", True)
             return
 
-        image_name = "qti-ubuntu-robotics-image-qrb5165-rb5-boot.img"
+        image_name = BOOT_IMAGE_NAME
         image_path = os.path.join(folder, image_name)
 
         if not os.path.exists(image_path):
@@ -302,7 +309,7 @@ class UpdateTab(QWidget):
             self.append_update_log("Kernel update FAILED.", True)
             # stop update chain on failure
 
-        self.btn_update.setEnabled(True)
+        self._update_controls()
         # Do NOT enable reboot here; only after full update is done
 
     def update_filesystem(self):
@@ -312,7 +319,7 @@ class UpdateTab(QWidget):
             self.append_update_log("Please select update folder.", True)
             return
 
-        image_name = "qti-ubuntu-robotics-image-qrb5165-rb5-sysfs.ext4"
+        image_name = SYSTEM_IMAGE_NAME
         image_path = os.path.join(folder, image_name)
 
         if not os.path.exists(image_path):
@@ -344,7 +351,7 @@ class UpdateTab(QWidget):
         else:
             self.append_update_log("File system update FAILED.", True)
 
-        self.btn_update.setEnabled(True)
+        self._update_controls()
         # Reboot is only enabled on success above
 
     def full_update(self):
@@ -352,6 +359,15 @@ class UpdateTab(QWidget):
         Run bootloader, kernel and filesystem updates in sequence.
         Assumes device is already in fastboot mode and update folder is selected.
         """
+        if not self._refresh_firmware_status():
+            self.append_update_log(
+                "ERROR: Missing required firmware files.", True
+            )
+            return
+        if not self.fastboot_ready:
+            self.append_update_log("ERROR: No Fastboot device detected.", True)
+            return
+
         self.append_update_log("Starting FULL UPDATE (Bootloader + Kernel + File System)...", True)
         self.btn_reboot.setEnabled(False)
         self.btn_update.setEnabled(False)
@@ -377,7 +393,8 @@ class UpdateTab(QWidget):
             self.append_update_log("Device reboot SUCCESS.", True)
         else:
             self.append_update_log("Device reboot FAILED.", True)
-        self.btn_update.setEnabled(False)
+        self.fastboot_ready = False
+        self._update_controls()
         self.btn_reboot.setEnabled(False)
 
     def check_fastboot(self, after_reboot=False):
@@ -399,11 +416,13 @@ class UpdateTab(QWidget):
         if devices:
             self.append_update_log("Fastboot device detected:")
             self.append_update_log("\n".join(devices), False)
-            self.btn_update.setEnabled(True)
+            self.fastboot_ready = True
+            self._update_controls()
             self.btn_reboot.setEnabled(True)
             return
 
-        self.btn_update.setEnabled(False)
+        self.fastboot_ready = False
+        self._update_controls()
         self.btn_reboot.setEnabled(False)
 
         if error:
