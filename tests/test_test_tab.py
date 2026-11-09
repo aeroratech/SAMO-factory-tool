@@ -22,12 +22,14 @@ class FakeSignal:
 
 
 class RecordingProcess:
+    FailedToStart = 0
     instances = []
 
     def __init__(self, parent=None):
         self.parent = parent
         self.readyReadStandardOutput = FakeSignal()
         self.readyReadStandardError = FakeSignal()
+        self.errorOccurred = FakeSignal()
         self.finished = FakeSignal()
         self.started_with = None
         self.stdout = b""
@@ -37,7 +39,12 @@ class RecordingProcess:
         self.started_with = (program, arguments)
 
     def readAllStandardOutput(self):
-        return self.stdout
+        output = self.stdout
+        self.stdout = b""
+        return output
+
+    def fail_to_start(self):
+        self.errorOccurred.emit(self.FailedToStart)
 
 
 class TestTabResultIndicatorTests(unittest.TestCase):
@@ -265,6 +272,41 @@ class TestTabSdcardResultTests(unittest.TestCase):
             self.tab.on_sdcard_check_finished(0, None, token)
         return token
 
+    def test_overlapping_mount_callbacks_read_their_originating_process(self):
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.run_sdcard_test()
+            old_process = self.tab.sdcard_process
+            old_process.stdout = b"old mount output\n"
+
+            self.tab.run_sdcard_test()
+            current_process = self.tab.sdcard_process
+            current_process.stdout = b"current mount output\n"
+
+            old_process.finished.emit(0, None)
+            self.assertEqual(b"current mount output\n", current_process.stdout)
+
+            current_process.finished.emit(0, None)
+            current_function_process = self.tab.sdcard_func_process
+            current_function_process.finished.emit(0, None)
+
+        self.assertEqual("✓", self.tab.sdcard_result_label.text())
+
+    def test_pre_disconnect_mount_callback_does_not_consume_new_run_output(self):
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.run_sdcard_test()
+            old_process = self.tab.sdcard_process
+            old_process.stdout = b"old mount output\n"
+
+            self.tab.set_device_online(False)
+            self.tab.set_device_online(True)
+            self.tab.run_sdcard_test()
+            current_process = self.tab.sdcard_process
+            current_process.stdout = b"current mount output\n"
+
+            old_process.finished.emit(0, None)
+
+        self.assertEqual(b"current mount output\n", current_process.stdout)
+
 
 class TestTabResetResultTests(unittest.TestCase):
     @classmethod
@@ -334,6 +376,100 @@ class TestTabResetResultTests(unittest.TestCase):
         with patch("test.QProcess", RecordingProcess):
             self.tab.on_reset_sync_finished(0, None, token)
         return token
+
+
+class TestTabProcessLaunchFailureTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        RecordingProcess.instances.clear()
+        self.tab = TestTab()
+        self.tab.set_device_online(True)
+
+    def tearDown(self):
+        self.tab.close()
+
+    def test_dual_initial_launch_failure_shows_failure(self):
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.run_dual_mode()
+            self.tab.dual_process.fail_to_start()
+
+        self.assertEqual("✗", self.tab.dual_result_label.text())
+
+    def test_sdcard_mount_launch_failure_shows_failure(self):
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.run_sdcard_test()
+            self.tab.sdcard_process.fail_to_start()
+
+        self.assertEqual("✗", self.tab.sdcard_result_label.text())
+
+    def test_sdcard_function_launch_failure_shows_failure(self):
+        token = self.tab._begin_test("sdcard")
+
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.run_sdcard_function_test(token)
+            self.tab.sdcard_func_process.fail_to_start()
+
+        self.assertEqual("✗", self.tab.sdcard_result_label.text())
+
+    def test_reset_delete_launch_failure_shows_failure(self):
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.run_reset()
+            self.tab.reset_process.fail_to_start()
+
+        self.assertEqual("✗", self.tab.reset_result_label.text())
+
+    def test_reset_sync_launch_failure_shows_failure(self):
+        token = self.tab._begin_test("reset")
+
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.on_reset_delete_finished(0, None, token)
+            self.tab.sync_process.fail_to_start()
+
+        self.assertEqual("✗", self.tab.reset_result_label.text())
+
+    def test_service_launch_failure_updates_only_originating_test(self):
+        sdcard_token = self.tab._begin_test("sdcard")
+        self.tab._complete_test("sdcard", True, sdcard_token)
+        dual_token = self.tab._begin_test("dual")
+
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.restart_camera_service("dual", dual_token)
+            self.tab.service_process.fail_to_start()
+
+        self.assertEqual("✗", self.tab.dual_result_label.text())
+        self.assertEqual("✓", self.tab.sdcard_result_label.text())
+
+    def test_launch_error_from_previous_run_does_not_override_current_run(self):
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.run_dual_mode()
+            old_process = self.tab.dual_process
+            self.tab.run_dual_mode()
+            current_process = self.tab.dual_process
+
+            old_process.fail_to_start()
+            self.assertEqual("", self.tab.dual_result_label.text())
+
+            current_process.fail_to_start()
+
+        self.assertEqual("✗", self.tab.dual_result_label.text())
+
+    def test_launch_error_from_before_disconnect_stays_invalid(self):
+        with patch("test.QProcess", RecordingProcess):
+            self.tab.run_reset()
+            old_process = self.tab.reset_process
+            self.tab.set_device_online(False)
+            self.tab.set_device_online(True)
+
+            old_process.fail_to_start()
+            self.assertEqual("", self.tab.reset_result_label.text())
+
+            self.tab.run_reset()
+            self.tab.reset_process.fail_to_start()
+
+        self.assertEqual("✗", self.tab.reset_result_label.text())
 
 
 class TestTabCameraServiceTests(unittest.TestCase):

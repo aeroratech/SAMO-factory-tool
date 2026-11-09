@@ -130,10 +130,21 @@ class TestTab(QWidget):
             self._active_result_tokens[test_name] = None
             self._clear_test_result(test_name)
 
+    def _connect_process_failure(self, process, test_name, token):
+        process.errorOccurred.connect(
+            lambda error, result_name=test_name, run_token=token:
+            self._on_process_error(error, result_name, run_token)
+        )
+
+    def _on_process_error(self, error, test_name, token):
+        if error == QProcess.FailedToStart:
+            self._complete_test(test_name, False, token)
+
     def run_dual_mode(self):
         token = self._begin_test("dual")
         self.append_log("Setting Dual Mode ...", True)
         self.dual_process = QProcess(self)
+        self._connect_process_failure(self.dual_process, "dual", token)
         self.dual_process.readyReadStandardOutput.connect(
             self.handle_dual_stdout
         )
@@ -182,10 +193,13 @@ class TestTab(QWidget):
         self.append_log("Checking SDCard mount status...", True)
 
         self.sdcard_process = QProcess(self)
+        process = self.sdcard_process
+        self._connect_process_failure(process, "sdcard", token)
         self.sdcard_process.finished.connect(
-            lambda exit_code, exit_status, run_token=token:
+            lambda exit_code, exit_status, run_token=token,
+            source_process=process:
             self.on_sdcard_check_finished(
-                exit_code, exit_status, run_token
+                exit_code, exit_status, run_token, source_process
             )
         )
 
@@ -194,9 +208,12 @@ class TestTab(QWidget):
             ["shell", "mount | grep /mnt/sdcard"]
         )
 
-    def on_sdcard_check_finished(self, exitCode, exitStatus, token=None):
+    def on_sdcard_check_finished(
+        self, exitCode, exitStatus, token=None, process=None
+    ):
+        source_process = process or self.sdcard_process
         output = bytes(
-            self.sdcard_process.readAllStandardOutput()
+            source_process.readAllStandardOutput()
         ).decode("utf-8", errors="ignore").strip()
 
         if exitCode == 0 and output:
@@ -212,6 +229,9 @@ class TestTab(QWidget):
         self.append_log("Running SDCard write/read test...", True)
 
         self.sdcard_func_process = QProcess(self)
+        self._connect_process_failure(
+            self.sdcard_func_process, "sdcard", token
+        )
         self.sdcard_func_process.finished.connect(
             lambda exit_code, exit_status, run_token=token:
             self.on_sdcard_func_finished(
@@ -239,6 +259,7 @@ class TestTab(QWidget):
 
         # Step 1: delete param file
         self.reset_process = QProcess(self)
+        self._connect_process_failure(self.reset_process, "reset", token)
         self.reset_process.finished.connect(
             lambda exit_code, exit_status, run_token=token:
             self.on_reset_delete_finished(
@@ -256,6 +277,9 @@ class TestTab(QWidget):
 
             # Step 2: sync
             self.sync_process = QProcess(self)
+            self._connect_process_failure(
+                self.sync_process, "reset", token
+            )
             self.sync_process.finished.connect(
                 lambda sync_exit_code, sync_exit_status, run_token=token:
                 self.on_reset_sync_finished(
@@ -282,6 +306,9 @@ class TestTab(QWidget):
 
     def restart_camera_service(self, test_name, token):
         self.service_process = QProcess(self)
+        self._connect_process_failure(
+            self.service_process, test_name, token
+        )
 
         self.service_process.readyReadStandardOutput.connect(
             self.handle_service_stdout
