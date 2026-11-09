@@ -9,16 +9,26 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QLineEdit,
     QFileDialog,
+    QLabel,
+    QGroupBox,
+    QFormLayout,
 )
 from PySide6.QtCore import QProcess
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QTextCursor
+
+
+ABL_IMAGE_NAME = "abl.elf"
+BOOT_IMAGE_NAME = "qti-ubuntu-robotics-image-qrb5165-rb5-boot.img"
+SYSTEM_IMAGE_NAME = "qti-ubuntu-robotics-image-qrb5165-rb5-sysfs.ext4"
+
 
 class UpdateTab(QWidget):
     def __init__(self):
         super().__init__()
 
         self.process = None
+        self.firmware_ready = False
         self.entry_step = 0
         self.fastboot_check_attempts = 0
         self.fastboot_check_after_reboot = False
@@ -41,6 +51,24 @@ class UpdateTab(QWidget):
 
         folder_layout.addWidget(self.update_folder_path_edit)
         folder_layout.addWidget(self.btn_select_folder)
+
+        # ===== Firmware Package Status =====
+        self.abl_status = QLabel(f"Missing: {ABL_IMAGE_NAME} ✗")
+        self.boot_status = QLabel(f"Missing: {BOOT_IMAGE_NAME} ✗")
+        self.system_status = QLabel(f"Missing: {SYSTEM_IMAGE_NAME} ✗")
+        for status_label in (
+            self.abl_status,
+            self.boot_status,
+            self.system_status,
+        ):
+            status_label.setStyleSheet("color: red;")
+
+        status_layout = QFormLayout()
+        status_layout.addRow("ABL image", self.abl_status)
+        status_layout.addRow("Boot image", self.boot_status)
+        status_layout.addRow("System image", self.system_status)
+        self.package_status_group = QGroupBox("Update Package")
+        self.package_status_group.setLayout(status_layout)
 
         # ===== Update Buttons =====
         button_layout = QVBoxLayout()
@@ -82,11 +110,41 @@ class UpdateTab(QWidget):
         # ===== Layout Combine =====
         main_layout.addLayout(folder_layout)
         main_layout.addSpacing(10)
+        main_layout.addWidget(self.package_status_group)
+        main_layout.addSpacing(10)
         main_layout.addLayout(button_layout)
         main_layout.addSpacing(10)
         main_layout.addWidget(self.update_text_edit)
 
         self.setLayout(main_layout)
+
+    def set_update_folder(self, folder):
+        self.update_folder_path_edit.setText(folder)
+        self._refresh_firmware_status()
+
+    def _refresh_firmware_status(self):
+        folder = self.update_folder_path_edit.text().strip()
+        status_items = (
+            (ABL_IMAGE_NAME, self.abl_status),
+            (BOOT_IMAGE_NAME, self.boot_status),
+            (SYSTEM_IMAGE_NAME, self.system_status),
+        )
+        ready = True
+        for filename, status_label in status_items:
+            file_ready = bool(folder) and os.path.isfile(
+                os.path.join(folder, filename)
+            )
+            if file_ready:
+                status_label.setText("Ready ✓")
+                status_label.setStyleSheet("color: green;")
+            else:
+                status_label.setText(f"Missing: {filename} ✗")
+                status_label.setStyleSheet("color: red;")
+                ready = False
+
+        self.firmware_ready = ready
+        self.btn_update.setEnabled(False)
+        return ready
 
     def select_folder(self):
         folder = QFileDialog.getExistingDirectory(
@@ -94,7 +152,7 @@ class UpdateTab(QWidget):
             "Select Update Folder"
         )
         if folder:
-            self.update_folder_path_edit.setText(folder)
+            self.set_update_folder(folder)
             self.append_update_log(f"Selected folder: {folder}")
     
     def enter_update_mode(self):
