@@ -1,9 +1,9 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout,
-    QPushButton, QTextEdit,
+    QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QTextEdit, QLabel,
 
 )
-from PySide6.QtCore import QProcess
+from PySide6.QtCore import QProcess, Qt
 
 
 class TestTab(QWidget):
@@ -11,6 +11,13 @@ class TestTab(QWidget):
         super().__init__()
 
         self.test_buffer = ""
+        self._device_online = False
+        self._next_result_token = 0
+        self._active_result_tokens = {
+            "dual": None,
+            "sdcard": None,
+            "reset": None,
+        }
         self.init_ui()
 
     # ===============================
@@ -27,13 +34,23 @@ class TestTab(QWidget):
         self.btn_sdcard = QPushButton("SDCard Test")
         self.btn_reset = QPushButton("Reset")
 
-        buttons = [
-            self.btn_dual_mode,
-            self.btn_sdcard,
-            self.btn_reset
+        self.dual_result_label = self._create_result_label()
+        self.sdcard_result_label = self._create_result_label()
+        self.reset_result_label = self._create_result_label()
+
+        self._result_labels = {
+            "dual": self.dual_result_label,
+            "sdcard": self.sdcard_result_label,
+            "reset": self.reset_result_label,
+        }
+
+        button_result_pairs = [
+            (self.btn_dual_mode, self.dual_result_label),
+            (self.btn_sdcard, self.sdcard_result_label),
+            (self.btn_reset, self.reset_result_label),
         ]
 
-        for btn in buttons:
+        for btn, result_label in button_result_pairs:
             btn.setMinimumHeight(45)
             btn.setStyleSheet("""
                 QPushButton {
@@ -41,8 +58,12 @@ class TestTab(QWidget):
                     font-weight: bold;
                 }
             """)
-            button_layout.addWidget(btn)
             btn.setEnabled(False)
+
+            row_layout = QHBoxLayout()
+            row_layout.addWidget(btn)
+            row_layout.addWidget(result_label)
+            button_layout.addLayout(row_layout)
 
         self.test_text_edit = QTextEdit()
         self.test_text_edit.setReadOnly(True)
@@ -63,11 +84,54 @@ class TestTab(QWidget):
         self.btn_sdcard.clicked.connect(self.run_sdcard_test)
         self.btn_reset.clicked.connect(self.run_reset)
 
+    @staticmethod
+    def _create_result_label():
+        label = QLabel("")
+        label.setFixedWidth(32)
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("font-size: 24px; font-weight: bold;")
+        return label
+
     def set_device_online(self, online):
+        self._device_online = online
         for btn in [self.btn_dual_mode, self.btn_sdcard, self.btn_reset]:
             btn.setEnabled(online)
+        if not online:
+            self._clear_all_test_results()
+
+    def _begin_test(self, test_name):
+        self._next_result_token += 1
+        token = self._next_result_token
+        self._active_result_tokens[test_name] = token
+        self._clear_test_result(test_name)
+        return token
+
+    def _complete_test(self, test_name, passed, token):
+        if not self._device_online:
+            return
+        if self._active_result_tokens.get(test_name) != token:
+            return
+
+        label = self._result_labels[test_name]
+        label.setText("✓" if passed else "✗")
+        color = "green" if passed else "red"
+        label.setStyleSheet(
+            f"font-size: 24px; font-weight: bold; color: {color};"
+        )
+        self._active_result_tokens[test_name] = None
+
+    def _clear_test_result(self, test_name):
+        label = self._result_labels[test_name]
+        label.setText("")
+        label.setStyleSheet("font-size: 24px; font-weight: bold;")
+
+    def _clear_all_test_results(self):
+        for test_name in self._result_labels:
+            self._active_result_tokens[test_name] = None
+            self._clear_test_result(test_name)
 
     def run_dual_mode(self):
+        token = self._begin_test("dual")
         self.append_log("Setting Dual Mode ...", True)
         self.dual_process = QProcess(self)
         self.dual_process.readyReadStandardOutput.connect(
@@ -77,7 +141,8 @@ class TestTab(QWidget):
             self.handle_dual_stderr
         )
         self.dual_process.finished.connect(
-            self.on_dual_finished
+            lambda exit_code, exit_status, run_token=token:
+            self.on_dual_finished(exit_code, exit_status, run_token)
         )
 
         sed_command = (
@@ -103,7 +168,7 @@ class TestTab(QWidget):
         if text.strip():
             self.append_log(text.strip(), False)
     
-    def on_dual_finished(self, exitCode, exitStatus):
+    def on_dual_finished(self, exitCode, exitStatus, token=None):
         if exitCode == 0:
             self.append_log("Dual Mode set SUCCESS.", True)
             self.restart_camera_service()
@@ -112,17 +177,23 @@ class TestTab(QWidget):
         self.append_log("Please using uvc player for preview", True)
 
     def run_sdcard_test(self):
+        token = self._begin_test("sdcard")
         self.append_log("Checking SDCard mount status...", True)
 
         self.sdcard_process = QProcess(self)
-        self.sdcard_process.finished.connect(self.on_sdcard_check_finished)
+        self.sdcard_process.finished.connect(
+            lambda exit_code, exit_status, run_token=token:
+            self.on_sdcard_check_finished(
+                exit_code, exit_status, run_token
+            )
+        )
 
         self.sdcard_process.start(
             "adb",
             ["shell", "mount | grep /mnt/sdcard"]
         )
 
-    def on_sdcard_check_finished(self, exitCode, exitStatus):
+    def on_sdcard_check_finished(self, exitCode, exitStatus, token=None):
         output = bytes(
             self.sdcard_process.readAllStandardOutput()
         ).decode("utf-8", errors="ignore").strip()
@@ -131,16 +202,19 @@ class TestTab(QWidget):
             self.append_log("SDCard INSERTED ✓", True)
 
             # continue do read/write test
-            self.run_sdcard_function_test()
+            self.run_sdcard_function_test(token)
         else:
             self.append_log("SDCard NOT detected ✗", True)
 
-    def run_sdcard_function_test(self):
+    def run_sdcard_function_test(self, token=None):
         self.append_log("Running SDCard write/read test...", True)
 
         self.sdcard_func_process = QProcess(self)
         self.sdcard_func_process.finished.connect(
-            self.on_sdcard_func_finished
+            lambda exit_code, exit_status, run_token=token:
+            self.on_sdcard_func_finished(
+                exit_code, exit_status, run_token
+            )
         )
 
         test_cmd = (
@@ -150,30 +224,41 @@ class TestTab(QWidget):
         )
         self.sdcard_func_process.start("adb", ["shell", test_cmd])
 
-    def on_sdcard_func_finished(self, exitCode, exitStatus):
+    def on_sdcard_func_finished(self, exitCode, exitStatus, token=None):
         if exitCode == 0:
             self.append_log("SDCard FUNCTION TEST PASS ✓", True)
         else:
             self.append_log("SDCard FUNCTION TEST FAIL ✗", True)
 
     def run_reset(self):
+        token = self._begin_test("reset")
         self.append_log("Resetting camera parameters...", True)
 
         # Step 1: delete param file
         self.reset_process = QProcess(self)
-        self.reset_process.finished.connect(self.on_reset_delete_finished)
+        self.reset_process.finished.connect(
+            lambda exit_code, exit_status, run_token=token:
+            self.on_reset_delete_finished(
+                exit_code, exit_status, run_token
+            )
+        )
         self.reset_process.start(
             "adb",
             ["shell", "rm -f /data/camera/cam_param.bin"]
         )
 
-    def on_reset_delete_finished(self, exitCode, exitStatus):
+    def on_reset_delete_finished(self, exitCode, exitStatus, token=None):
         if exitCode == 0:
             self.append_log("Parameter file removed.", False)
 
             # Step 2: sync
             self.sync_process = QProcess(self)
-            self.sync_process.finished.connect(self.on_reset_sync_finished)
+            self.sync_process.finished.connect(
+                lambda sync_exit_code, sync_exit_status, run_token=token:
+                self.on_reset_sync_finished(
+                    sync_exit_code, sync_exit_status, run_token
+                )
+            )
             self.sync_process.start(
                 "adb",
                 ["shell", "sync"]
@@ -181,7 +266,7 @@ class TestTab(QWidget):
         else:
             self.append_log("Reset FAILED (ADB error during delete).", True)
 
-    def on_reset_sync_finished(self, exitCode, exitStatus):
+    def on_reset_sync_finished(self, exitCode, exitStatus, token=None):
         if exitCode == 0:
             self.append_log("File system synced.", False)
 
