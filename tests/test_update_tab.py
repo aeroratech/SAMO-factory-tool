@@ -25,14 +25,20 @@ class FakeSignal:
     def connect(self, callback):
         self.callback = callback
 
+    def emit(self, *args):
+        if self.callback:
+            self.callback(*args)
+
 
 class RecordingProcess:
+    FailedToStart = 0
     instances = []
 
     def __init__(self, parent=None):
         self.parent = parent
         self.readyReadStandardOutput = FakeSignal()
         self.readyReadStandardError = FakeSignal()
+        self.errorOccurred = FakeSignal()
         self.finished = FakeSignal()
         self.started_with = None
         self.instances.append(self)
@@ -295,6 +301,39 @@ class UpdateTabReadinessTests(unittest.TestCase):
 
         self.assertFalse(self.tab.fastboot_ready)
         self.assertFalse(self.tab.btn_update.isEnabled())
+
+    def test_active_update_cannot_be_reenabled_or_started_twice(self):
+        self.create_package()
+        self.tab.set_update_folder(str(self.root))
+        self.detect_fastboot()
+
+        with patch("update.QProcess", RecordingProcess):
+            self.tab.full_update()
+            self.tab.set_update_folder(str(self.root))
+            self.tab.full_update()
+
+        self.assertEqual(1, len(RecordingProcess.instances))
+        self.assertFalse(self.tab.btn_select_folder.isEnabled())
+        self.assertFalse(self.tab.btn_update.isEnabled())
+
+    def test_flash_launch_failure_restores_controls_for_retry(self):
+        self.create_package()
+        self.tab.set_update_folder(str(self.root))
+        self.detect_fastboot()
+
+        with patch("update.QProcess", RecordingProcess):
+            self.tab.full_update()
+            failed_process = RecordingProcess.instances[0]
+            failed_process.errorOccurred.emit(
+                RecordingProcess.FailedToStart
+            )
+            failed_process.finished.emit()
+
+        self.assertTrue(hasattr(self.tab, "update_in_progress"))
+        self.assertFalse(self.tab.update_in_progress)
+        self.assertEqual(1, len(RecordingProcess.instances))
+        self.assertTrue(self.tab.btn_select_folder.isEnabled())
+        self.assertTrue(self.tab.btn_update.isEnabled())
 
 if __name__ == "__main__":
     unittest.main()

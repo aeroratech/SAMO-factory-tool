@@ -30,6 +30,7 @@ class UpdateTab(QWidget):
         self.process = None
         self.firmware_ready = False
         self.fastboot_ready = False
+        self.update_in_progress = False
         self.entry_step = 0
         self.fastboot_check_attempts = 0
         self.fastboot_check_after_reboot = False
@@ -149,8 +150,19 @@ class UpdateTab(QWidget):
 
     def _update_controls(self):
         self.btn_update.setEnabled(
-            self.firmware_ready and self.fastboot_ready
+            self.firmware_ready
+            and self.fastboot_ready
+            and not self.update_in_progress
         )
+
+    def _set_update_in_progress(self, active):
+        self.update_in_progress = active
+        self.btn_select_folder.setEnabled(not active)
+        self.btn_entry_update.setEnabled(not active)
+        self._update_controls()
+
+    def _finish_update(self):
+        self._set_update_in_progress(False)
 
     def select_folder(self):
         folder = QFileDialog.getExistingDirectory(
@@ -218,10 +230,13 @@ class UpdateTab(QWidget):
         folder = self.update_folder_path_edit.text()
         if not folder:
             self.append_update_log("Please select update folder first.")
+            self._finish_update()
             return
         abl_path = os.path.join(folder, ABL_IMAGE_NAME)
         if not os.path.exists(abl_path):
             self.append_update_log(f"ERROR: File not found -> {abl_path}")
+            self._refresh_firmware_status()
+            self._finish_update()
             return
         self.append_update_log("Start Bootloader update...")
         self.append_update_log(f"Using file: {abl_path}")
@@ -235,6 +250,9 @@ class UpdateTab(QWidget):
         self.bootloader_process.readyReadStandardError.connect(
             self.handle_bootloader_stderr
         )
+        self.bootloader_process.errorOccurred.connect(
+            self.on_flash_process_error
+        )
         self.bootloader_process.finished.connect(
             self.on_bootloader_step_finished
         )
@@ -247,6 +265,8 @@ class UpdateTab(QWidget):
         )
 
     def on_bootloader_step_finished(self):
+        if not self.update_in_progress:
+            return
         if self.bootloader_step == 1:
             self.append_update_log("abl_a flashed. Flashing abl_b...")
 
@@ -268,6 +288,7 @@ class UpdateTab(QWidget):
 
         if not folder:
             self.append_update_log("Please select update folder.", True)
+            self._finish_update()
             return
 
         image_name = BOOT_IMAGE_NAME
@@ -275,6 +296,8 @@ class UpdateTab(QWidget):
 
         if not os.path.exists(image_path):
             self.append_update_log(f"Kernel image not found: {image_name}", True)
+            self._refresh_firmware_status()
+            self._finish_update()
             return
 
         self.append_update_log("Start upgrading Kernel...", True)
@@ -289,6 +312,9 @@ class UpdateTab(QWidget):
         )
         self.kernel_process.readyReadStandardError.connect(
             self.handle_kernel_stderr
+        )
+        self.kernel_process.errorOccurred.connect(
+            self.on_flash_process_error
         )
         self.kernel_process.finished.connect(
             self.on_kernel_finished
@@ -309,7 +335,7 @@ class UpdateTab(QWidget):
             self.append_update_log("Kernel update FAILED.", True)
             # stop update chain on failure
 
-        self._update_controls()
+        self._finish_update()
         # Do NOT enable reboot here; only after full update is done
 
     def update_filesystem(self):
@@ -317,6 +343,7 @@ class UpdateTab(QWidget):
 
         if not folder:
             self.append_update_log("Please select update folder.", True)
+            self._finish_update()
             return
 
         image_name = SYSTEM_IMAGE_NAME
@@ -324,6 +351,8 @@ class UpdateTab(QWidget):
 
         if not os.path.exists(image_path):
             self.append_update_log(f"File system image not found: {image_name}", True)
+            self._refresh_firmware_status()
+            self._finish_update()
             return
 
         self.append_update_log("Start update File System...", True)
@@ -335,6 +364,9 @@ class UpdateTab(QWidget):
         )
         self.filesystem_process.readyReadStandardError.connect(
             self.handle_filesystem_stderr
+        )
+        self.filesystem_process.errorOccurred.connect(
+            self.on_flash_process_error
         )
         self.filesystem_process.finished.connect(
             self.on_filesystem_finished
@@ -351,7 +383,7 @@ class UpdateTab(QWidget):
         else:
             self.append_update_log("File system update FAILED.", True)
 
-        self._update_controls()
+        self._finish_update()
         # Reboot is only enabled on success above
 
     def full_update(self):
@@ -359,6 +391,8 @@ class UpdateTab(QWidget):
         Run bootloader, kernel and filesystem updates in sequence.
         Assumes device is already in fastboot mode and update folder is selected.
         """
+        if self.update_in_progress:
+            return
         if not self._refresh_firmware_status():
             self.append_update_log(
                 "ERROR: Missing required firmware files.", True
@@ -368,10 +402,17 @@ class UpdateTab(QWidget):
             self.append_update_log("ERROR: No Fastboot device detected.", True)
             return
 
+        self._set_update_in_progress(True)
         self.append_update_log("Starting FULL UPDATE (Bootloader + Kernel + File System)...", True)
         self.btn_reboot.setEnabled(False)
         self.btn_update.setEnabled(False)
         self.update_bootloader()
+
+    def on_flash_process_error(self, process_error):
+        if process_error != QProcess.FailedToStart:
+            return
+        self.append_update_log("ERROR: Failed to start update process.", True)
+        self._finish_update()
 
     def reboot_device(self):
         self.append_update_log("Rebooting device...", True)
